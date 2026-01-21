@@ -3,3 +3,5 @@ simpy
 networkx
 torch
 edge-sim-py
+pandas
+matplotlib
