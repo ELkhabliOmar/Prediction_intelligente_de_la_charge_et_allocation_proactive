@@ -132,10 +132,14 @@ class Module2_ProactivePlanner:
         self.target_util = target_util
         print("[Module2] Planner initialisé (scaling + offload).")
 
-    def plan(self, predictions: Dict[int, Dict[str, float]], fog_node: EdgeServer) -> Dict[str, Any]:
-        # robust pressure
-        robust_p = max((v["prediction"] + v["uncertainty"]) for v in predictions.values())
-        robust_p = max(0.0, min(robust_p, 30.0))  # garde-fou
+    def plan(self, predictions: Dict[int, Dict[str, float]], fog_node: EdgeServer, total_incoming_demand: float, current_pressure: float = 0.0) -> Dict[str, Any]:
+        # On utilise la prédiction pour anticiper la charge FOG, mais on ajoute la demande entrante
+        # pour ne pas être trompé par un offload massif.
+        pred_h5 = predictions.get(5, {"prediction": 0.0, "uncertainty": 0.0})
+        robust_p = pred_h5["prediction"] + pred_h5["uncertainty"]
+
+        # Demande future estimée = charge résiduelle prédite + charge entrante totale
+        predicted_active_cpu = (robust_p * fog_node.cpu) + total_incoming_demand
 
         base_cpu = getattr(fog_node, "base_cpu", fog_node.cpu)
         current_cpu = fog_node.cpu
@@ -143,13 +147,10 @@ class Module2_ProactivePlanner:
         max_cap = base_cpu * 2
         min_cap = int(base_cpu * 0.5)
 
-        # predicted_active_cpu = robust_p * current_cpu
-        predicted_active_cpu = robust_p * current_cpu
-
         # CPU requis pour viser target_util
         required_cpu = predicted_active_cpu / max(self.target_util, 1e-6)
 
-        decision = "none"
+        decision = "none" 
         reason = "within hysteresis band"
         if required_cpu > current_cpu * 1.1 and current_cpu < max_cap:
             decision = "up"
@@ -172,6 +173,12 @@ class Module2_ProactivePlanner:
             excess = predicted_active_cpu - next_cpu
             offload_ratio = max(0.0, min(1.0, excess / max(predicted_active_cpu, 1e-6)))
             offload_reason = f"demand({predicted_active_cpu:.1f}) > next_cpu({next_cpu})"
+
+        # Force offload if current pressure is critical (Safety Net)
+        if current_pressure > 1.0:
+            min_offload = 0.3 + 0.2 * (current_pressure - 1.0) # ex: press=1.5 -> 0.3 + 0.1 = 0.4
+            offload_ratio = max(offload_ratio, min(0.9, min_offload))
+            offload_reason += f" | FORCED (pressure={current_pressure:.2f})"
 
         return {
             "robust_pred": robust_p,
@@ -295,6 +302,19 @@ def proactive_placement_algorithm(parameters):
     if not hasattr(fog_node, "base_cpu"):
         fog_node.base_cpu = fog_node.cpu
 
+    # ---- 0) Reactive Check (Emergency Scaling) ----
+    # Si la pression explose entre deux cycles MAPE, on agit tout de suite
+    active_cpu_fog_check = sum(s.cpu_demand for s in ACTIVE_SERVICES if getattr(s, "placed_on", None) == "Fog")
+    pressure_check = active_cpu_fog_check / fog_node.cpu if fog_node.cpu > 0 else 0.0
+    
+    if pressure_check > 1.2: # Seuil critique d'urgence
+        max_cap = getattr(fog_node, "base_cpu", 100) * 3 # Autoriser x3 en urgence
+        if fog_node.cpu < max_cap:
+            old_cpu = fog_node.cpu
+            fog_node.cpu = min(max_cap, fog_node.cpu + 50)
+            print(f"[t={CURRENT_T:02d}] 🚨 EMERGENCY SCALE UP: {old_cpu} -> {fog_node.cpu} (Pressure={pressure_check:.2f})")
+            PLAN["scale_decision"] = "emergency_up"
+
     # ---- 1) Fin des services (durées)
     remaining = []
     for s in ACTIVE_SERVICES:
@@ -305,6 +325,9 @@ def proactive_placement_algorithm(parameters):
 
     # ---- 2) Injection + Scheduling (IMPORTANT: avant le log)
     tasks_now = WORKLOAD_IDX.get(CURRENT_T, [])
+    # Calcul de la demande totale entrante pour le planner
+    total_incoming_demand = sum(t["cpu_demand"] for t in tasks_now)
+
     tasks_placed_fog_this_tick = 0
     tasks_placed_cloud_this_tick = 0
     for task in tasks_now:
@@ -370,7 +393,8 @@ def proactive_placement_algorithm(parameters):
     # ---- 4) MAPE toutes W (agit sur les ticks suivants)
     if CURRENT_T > 0 and (CURRENT_T % W_WINDOW == 0):
         PREDICTIONS = MODULE1.predict(PRESSURE_HISTORY)
-        PLAN = MODULE2.plan(PREDICTIONS, fog_node)
+        current_p = PRESSURE_HISTORY[-1] if PRESSURE_HISTORY else 0.0
+        PLAN = MODULE2.plan(PREDICTIONS, fog_node, total_incoming_demand=total_incoming_demand, current_pressure=current_p)
 
         if PLAN["scale_decision"] in ("up", "down"):
             fog_node.cpu = PLAN["next_cpu"]
@@ -405,7 +429,7 @@ def main():
     ap.add_argument("--dqn_model", default=os.path.join("models", "dqn_fog_cloud.pth"))
     ap.add_argument("--fog_cpu", type=int, default=100)
     ap.add_argument("--ticks", type=int, default=100)
-    ap.add_argument("--W", type=int, default=10)
+    ap.add_argument("--W", type=int, default=5)
     ap.add_argument("--output_csv", default=None, help="Chemin pour sauvegarder les métriques CSV.")
     args = ap.parse_args()
 

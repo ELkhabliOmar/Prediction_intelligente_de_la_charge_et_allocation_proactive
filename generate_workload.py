@@ -73,8 +73,8 @@ def generate_workload_train(ticks: int, seed: int) -> List[Dict]:
             cpu_rng = (8, 18)
             dur_rng = (5, 10)
         elif 50 <= t <= 69:
-            n = rng.randint(4, 7)                 # fort (mais pas délirant)
-            cpu_rng = (12, 35)
+            n = rng.randint(5, 9)                 # fort (plus intense pour couvrir les pics de test)
+            cpu_rng = (15, 45)
             dur_rng = (8, 16)
         elif 70 <= t <= 79:
             n = rng.randint(1, 2)                 # faible
