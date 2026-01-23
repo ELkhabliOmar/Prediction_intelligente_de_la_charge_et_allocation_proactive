@@ -1,0 +1,28 @@
+python generate_workload.py
+python train_lstm.py --epochs 150 --hidden_dim 64 --num_layers 2
+python train_dqn.py --steps 30000 --hidden_dim 128 --replay_size 50000
+python test.py --ticks 200 --W 10 --target_util 0.70
+
+# 1. Générer un bon dataset
+python generate_workload.py --ticks 500 --max_tasks 100
+
+# 2. Entraîner le nouveau LSTM
+python train_lstm.py \
+    --seq_len 30 \
+    --epochs 200 \
+    --hidden_dim 128 \
+    --dropout 0.3 \
+    --lr 0.001 \
+    --patience 25
+
+# 3. Tester le modèle
+python test.py \
+    --lstm_model models/lstm_util.pth \
+    --ticks 200 \
+    --W 10 \
+    --output_csv data/results_detailed.csv
+
+# 4. Visualiser les résultats
+python plot_results.py \
+    --input data/results_detailed.csv \
+    --output images/analysis_detailed.png

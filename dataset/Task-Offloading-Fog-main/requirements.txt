@@ -1,0 +1,13 @@
+networkx
+simpy
+numpy
+pandas
+tensorboard
+matplotlib
+seaborn
+opencv-python
+tqdm
+PyQt5
+
+torch
+PyYAML

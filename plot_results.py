@@ -1,112 +1,375 @@
-# plot_results.py
-# Usage:
-#   python plot_results.py --input data/results_up.csv --output images/results_up.png
-
+# plot_results.py (AMÉLIORÉ)
 import argparse
 import os
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+from matplotlib.patches import Rectangle
 
 
 def plot_simulation_results(csv_path: str, output_path: str):
     """
-    Génère un graphique professionnel à partir des métriques de simulation.
+    Génère un graphique professionnel avec analyse des performances.
     """
     if not os.path.exists(csv_path):
         print(f"Erreur: Fichier de résultats introuvable: {csv_path}")
         return
 
     df = pd.read_csv(csv_path)
-
+    
+    # Calcul des métriques de performance
+    metrics = calculate_performance_metrics(df)
+    
     # --- Création de la figure et des sous-graphiques ---
-    fig, (ax1, ax2, ax3, ax4) = plt.subplots(
-        4, 1,
-        figsize=(16, 22),
-        sharex=True,
-        gridspec_kw={'height_ratios': [3, 3, 2, 2]}
-    )
-    fig.suptitle(f"Analyse de la Simulation - {os.path.basename(csv_path)}", fontsize=20, y=0.95)
+    fig = plt.figure(figsize=(20, 28))
+    
+    # Définition des grilles
+    gs = fig.add_gridspec(7, 2, height_ratios=[3, 3, 2, 2, 1.5, 1.5, 1.5], hspace=0.4)
+    
+    ax1 = fig.add_subplot(gs[0, :])
+    ax2 = fig.add_subplot(gs[1, :])
+    ax3 = fig.add_subplot(gs[2, :])
+    ax4 = fig.add_subplot(gs[3, :])
+    ax5 = fig.add_subplot(gs[4, 0])  # Métriques gauche
+    ax6 = fig.add_subplot(gs[4, 1])  # Métriques droite
+    ax7 = fig.add_subplot(gs[5, :])  # Prédictions vs Réalité
+    ax8 = fig.add_subplot(gs[6, :])  # Heatmap décisions
 
-    # --- Graphique 1: Charge vs. Capacité du Fog ---
-    ax1.plot(df['t'], df['active_cpu_fog'], label='Charge Fog (CPU)', color='dodgerblue', linewidth=2)
-    ax1.plot(df['t'], df['fog_capacity'], label='Capacité Fog (CPU)', color='red', linestyle='--', linewidth=2)
-    ax1.set_ylabel("Unités CPU")
-    ax1.set_title("Charge et Capacité du Nœud Fog", fontsize=14)
-    ax1.legend()
-    ax1.grid(True, which='both', linestyle=':', linewidth=0.5)
+    # Titre principal
+    workload_name = os.path.basename(csv_path).replace('.csv', '').replace('results_', '')
+    fig.suptitle(f"ANALYSE DÉTAILLÉE - Simulation {workload_name.upper()}", 
+                 fontsize=22, y=0.98, fontweight='bold')
 
-    # Annoter les décisions de scaling
-    scale_up_times = df[df['scale_decision'] == 'up']['t']
-    scale_down_times = df[df['scale_decision'] == 'down']['t']
-    for t in scale_up_times:
-        ax1.axvline(x=t, color='green', linestyle=':', linewidth=1.5, label=f'Scale Up at t={t}' if t == scale_up_times.iloc[0] else "")
-    for t in scale_down_times:
-        ax1.axvline(x=t, color='purple', linestyle=':', linewidth=1.5, label=f'Scale Down at t={t}' if t == scale_down_times.iloc[0] else "")
-    # Pour éviter les duplications de labels dans la légende
-    handles, labels = ax1.get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    ax1.legend(by_label.values(), by_label.keys())
-
-    # --- Graphique 2: Pression (Utilisation) et Prédictions ---
-    ax2.plot(df['t'], df['pressure'], label='Pression Réelle (Utilisation)', color='darkorange', linewidth=2)
-    ax2.plot(df['t'], df['predicted_pressure'], label='Pression Prédite (LSTM)', color='black', linestyle=':', linewidth=1.5)
-    # Zone d'incertitude
-    ax2.fill_between(
-        df['t'],
-        df['predicted_pressure'] - df['prediction_uncertainty'],
-        df['predicted_pressure'] + df['prediction_uncertainty'],
-        color='gray', alpha=0.2, label='Incertitude de prédiction'
-    )
-    ax2.axhline(y=1.0, color='red', linestyle='--', linewidth=1, label='Seuil de Surcharge (100%)')
-    ax2.set_ylabel("Pression (Ratio)")
-    ax2.set_title("Pression du Fog et Prédictions LSTM", fontsize=14)
-    ax2.legend()
-    ax2.grid(True, which='both', linestyle=':', linewidth=0.5)
-    ax2.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
-
-    # --- Graphique 3: Ratio de Délestage (Offloading) ---
-    ax3.plot(df['t'], df['offload_ratio'], label='Ratio de Délestage', color='sienna', marker='.', linestyle='-')
-    ax3.set_ylabel("Ratio de Délestage")
-    ax3.set_title("Décisions de Délestage (Offloading)", fontsize=14)
-    ax3.legend(loc='upper left')
-    ax3.grid(True, which='both', linestyle=':', linewidth=0.5)
-    ax3.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
-
-    # Axe Y secondaire pour le nombre de tâches délestées
-    ax3b = ax3.twinx()
-    ax3b.bar(df['t'], df['tasks_placed_cloud'], label='Tâches délestées (par tick)', color='lightcoral', alpha=0.6)
-    ax3b.set_ylabel("Nb Tâches délestées")
-    ax3b.legend(loc='upper right')
-
-    # --- Graphique 4: Répartition des Tâches Actives ---
-    ax4.stackplot(
-        df['t'], df['tasks_on_fog'], df['tasks_on_cloud'],
-        labels=['Tâches sur Fog', 'Tâches sur Cloud'],
-        colors=['skyblue', 'salmon'],
-        alpha=0.8
-    )
-    ax4.set_xlabel("Temps (ticks)", fontsize=12)
-    ax4.set_ylabel("Nombre de Tâches Actives")
-    ax4.set_title("Répartition des Tâches Actives (Fog vs. Cloud)", fontsize=14)
-    ax4.legend(loc='upper left')
-    ax4.grid(True, which='both', linestyle=':', linewidth=0.5)
-
+    # --- 1. Charge vs. Capacité du Fog ---
+    plot_load_capacity(ax1, df)
+    
+    # --- 2. Pression et Prédictions avec analyse d'erreur ---
+    plot_pressure_predictions(ax2, df, metrics)
+    
+    # --- 3. Offloading et Décisions ---
+    plot_offloading_decisions(ax3, df, metrics)
+    
+    # --- 4. Répartition des Tâches ---
+    plot_task_distribution(ax4, df)
+    
+    # --- 5. Métriques de Performance (Gauche) ---
+    plot_performance_metrics_left(ax5, metrics)
+    
+    # --- 6. Métriques de Performance (Droite) ---
+    plot_performance_metrics_right(ax6, metrics)
+    
+    # --- 7. Erreurs de Prédiction par Pression ---
+    plot_prediction_errors(ax7, df, metrics)
+    
+    # --- 8. Heatmap des Décisions ---
+    plot_decision_heatmap(ax8, df)
+    
     # --- Finalisation ---
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.tight_layout(rect=[0, 0.02, 1, 0.96])
     
     # Créer le dossier de sortie si nécessaire
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
         
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.savefig(output_path, dpi=200, bbox_inches='tight')
     print(f"[OK] Graphique sauvegardé dans: {output_path}")
+    
+    # Afficher les métriques dans la console
+    print("\n📊 MÉTRIQUES DE PERFORMANCE:")
+    print(f"   MAE de prédiction: {metrics['mae']:.4f}")
+    print(f"   RMSE de prédiction: {metrics['rmse']:.4f}")
+    print(f"   Pression moyenne: {metrics['avg_pressure']:.2%}")
+    print(f"   Surcharge (>100%): {metrics['overload_percentage']:.1%}")
+    print(f"   Offload moyen: {metrics['avg_offload']:.1%}")
+    print(f"   Nombre de scaling: {metrics['num_scaling']}")
+    print(f"   Efficacité Fog: {metrics['fog_efficiency']:.1%}")
+    print(f"   Stabilité (σ pression): {metrics['pressure_std']:.3f}")
+    
     plt.close()
 
 
+def calculate_performance_metrics(df):
+    """Calcule les métriques de performance."""
+    metrics = {}
+    
+    # Erreurs de prédiction
+    valid_preds = df[df['predicted_pressure'] > 0]
+    if len(valid_preds) > 0:
+        errors = valid_preds['pressure'] - valid_preds['predicted_pressure']
+        metrics['mae'] = np.mean(np.abs(errors))
+        metrics['rmse'] = np.sqrt(np.mean(errors**2))
+        metrics['bias'] = np.mean(errors)  # Biais systématique
+    else:
+        metrics['mae'] = metrics['rmse'] = metrics['bias'] = 0
+    
+    # Métriques de charge
+    metrics['avg_pressure'] = df['pressure'].mean()
+    metrics['max_pressure'] = df['pressure'].max()
+    metrics['overload_percentage'] = (df['pressure'] > 1.0).mean()
+    metrics['pressure_std'] = df['pressure'].std()
+    
+    # Métriques d'offload
+    metrics['avg_offload'] = df['offload_ratio'].mean()
+    metrics['max_offload'] = df['offload_ratio'].max()
+    metrics['total_offloaded_tasks'] = df['tasks_placed_cloud'].sum()
+    metrics['total_fog_tasks'] = df['tasks_placed_fog'].sum()
+    
+    # Métriques de scaling
+    scale_changes = df[df['scale_decision'].isin(['up', 'down', 'emergency_up'])]
+    metrics['num_scaling'] = len(scale_changes)
+    metrics['scaling_frequency'] = metrics['num_scaling'] / len(df)
+    
+    # Efficacité
+    capacity_used = df['active_cpu_fog'].sum()
+    capacity_available = df['fog_capacity'].sum()
+    metrics['fog_efficiency'] = capacity_used / capacity_available if capacity_available > 0 else 0
+    
+    # Coût estimé (simplifié)
+    cloud_cost = metrics['total_offloaded_tasks'] * 0.02  # Coût cloud par tâche
+    fog_cost = metrics['total_fog_tasks'] * 0.001  # Coût fog par tâche
+    scaling_cost = metrics['num_scaling'] * 0.05  # Coût de changement de capacité
+    metrics['estimated_cost'] = cloud_cost + fog_cost + scaling_cost
+    
+    return metrics
+
+
+def plot_load_capacity(ax, df):
+    """Graphique charge vs capacité."""
+    ax.plot(df['t'], df['active_cpu_fog'], label='Charge Fog (CPU)', 
+           color='dodgerblue', linewidth=2.5, alpha=0.8)
+    ax.plot(df['t'], df['fog_capacity'], label='Capacité Fog (CPU)', 
+           color='crimson', linestyle='--', linewidth=2)
+    
+    # Remplissage entre charge et capacité
+    ax.fill_between(df['t'], df['active_cpu_fog'], df['fog_capacity'],
+                   where=(df['active_cpu_fog'] > df['fog_capacity']),
+                   color='red', alpha=0.2, label='Dépassement')
+    
+    # Annotations des décisions de scaling
+    for idx, row in df.iterrows():
+        if row['scale_decision'] == 'up':
+            ax.annotate('↑', xy=(row['t'], row['fog_capacity']),
+                       xytext=(0, 10), textcoords='offset points',
+                       ha='center', color='green', fontsize=12, fontweight='bold')
+        elif row['scale_decision'] == 'down':
+            ax.annotate('↓', xy=(row['t'], row['fog_capacity']),
+                       xytext=(0, -15), textcoords='offset points',
+                       ha='center', color='purple', fontsize=12, fontweight='bold')
+    
+    ax.set_ylabel("Unités CPU", fontsize=12)
+    ax.set_title("① CHARGE vs CAPACITÉ FOG", fontsize=14, fontweight='bold', pad=10)
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(bottom=0)
+
+
+def plot_pressure_predictions(ax, df, metrics):
+    """Graphique pression et prédictions."""
+    # Pression réelle
+    ax.plot(df['t'], df['pressure'], label='Pression Réelle', 
+           color='darkorange', linewidth=3, alpha=0.8)
+    
+    # Prédictions
+    ax.plot(df['t'], df['predicted_pressure'], label='Prédiction LSTM', 
+           color='black', linestyle='--', linewidth=1.5, alpha=0.7)
+    
+    # Zone d'incertitude
+    ax.fill_between(df['t'], 
+                   df['predicted_pressure'] - df['prediction_uncertainty'],
+                   df['predicted_pressure'] + df['prediction_uncertainty'],
+                   color='gray', alpha=0.2, label='Incertitude (±)')
+    
+    # Seuils importants
+    ax.axhline(y=1.0, color='red', linestyle='-', linewidth=1.5, alpha=0.5, 
+              label='Seuil Surcharge (100%)')
+    ax.axhline(y=0.7, color='green', linestyle=':', linewidth=1, alpha=0.5,
+              label='Cible (70%)')
+    ax.axhline(y=0.3, color='blue', linestyle=':', linewidth=1, alpha=0.5,
+              label='Sous-utilisation (30%)')
+    
+    # Remplissage de surcharge
+    ax.fill_between(df['t'], 1.0, df['pressure'], 
+                   where=(df['pressure'] > 1.0),
+                   color='red', alpha=0.1, label='Zone de Surcharge')
+    
+    ax.set_ylabel("Pression (Utilisation)", fontsize=12)
+    ax.set_title("② PRESSION RÉELLE vs PRÉDICTIONS", fontsize=14, fontweight='bold', pad=10)
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+    ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+    ax.set_ylim(-0.05, min(2.5, df['pressure'].max() * 1.2))
+
+
+def plot_offloading_decisions(ax, df, metrics):
+    """Graphique offloading et décisions."""
+    # Ratio d'offload
+    ax.plot(df['t'], df['offload_ratio'], label='Ratio de Délestage', 
+           color='sienna', linewidth=2.5, marker='o', markersize=4, alpha=0.8)
+    
+    # Tâches délestées
+    ax2 = ax.twinx()
+    bars = ax2.bar(df['t'], df['tasks_placed_cloud'], 
+                  label='Tâches Cloud/tick', color='lightcoral', alpha=0.6, width=0.8)
+    
+    # Annoter les pics d'offload
+    offload_peaks = df.nlargest(3, 'offload_ratio')
+    for _, peak in offload_peaks.iterrows():
+        ax.annotate(f"{peak['offload_ratio']:.0%}", 
+                   xy=(peak['t'], peak['offload_ratio']),
+                   xytext=(0, 10), textcoords='offset points',
+                   ha='center', fontsize=9, fontweight='bold',
+                   bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7))
+    
+    ax.set_ylabel("Ratio de Délestage", fontsize=12, color='sienna')
+    ax2.set_ylabel("Tâches Cloud", fontsize=12, color='lightcoral')
+    ax.set_title("③ DÉLESTAGE (OFFLOADING)", fontsize=14, fontweight='bold', pad=10)
+    
+    # Légende combinée
+    lines1, labels1 = ax.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+    
+    ax.grid(True, alpha=0.3)
+    ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+    ax.set_ylim(-0.05, 1.05)
+
+
+def plot_task_distribution(ax, df):
+    """Graphique répartition des tâches."""
+    # Stack plot
+    ax.stackplot(df['t'], df['tasks_on_fog'], df['tasks_on_cloud'],
+                labels=['Tâches Fog', 'Tâches Cloud'],
+                colors=['#1f77b4', '#ff7f0e'], alpha=0.8)
+    
+    # Ligne de capacité Fog (approximative)
+    ax.plot(df['t'], df['tasks_on_fog'] + df['tasks_on_cloud'],
+           label='Total Tâches', color='black', linestyle=':', linewidth=1)
+    
+    ax.set_xlabel("Temps (ticks)", fontsize=12)
+    ax.set_ylabel("Nombre de Tâches Actives", fontsize=12)
+    ax.set_title("④ RÉPARTITION DES TÂCHES ACTIVES", fontsize=14, fontweight='bold', pad=10)
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(bottom=0)
+
+
+def plot_performance_metrics_left(ax, metrics):
+    """Affiche les métriques de performance (gauche)."""
+    ax.axis('off')
+    
+    text = (
+        "📈 MÉTRIQUES DE PERFORMANCE\n\n"
+        f"• MAE Prédiction: {metrics['mae']:.4f}\n"
+        f"• RMSE Prédiction: {metrics['rmse']:.4f}\n"
+        f"• Biais: {metrics['bias']:+.4f}\n"
+        f"• Pression Moyenne: {metrics['avg_pressure']:.1%}\n"
+        f"• Pression Max: {metrics['max_pressure']:.1%}\n"
+        f"• Surcharge (>100%): {metrics['overload_percentage']:.1%}\n"
+        f"• Stabilité (σ): {metrics['pressure_std']:.3f}"
+    )
+    
+    ax.text(0.1, 0.9, text, transform=ax.transAxes,
+           fontsize=11, verticalalignment='top',
+           bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.3))
+    
+    ax.set_title("⑤ MÉTRIQUES PRÉDICTION", fontsize=12, fontweight='bold', pad=10)
+
+
+def plot_performance_metrics_right(ax, metrics):
+    """Affiche les métriques de performance (droite)."""
+    ax.axis('off')
+    
+    text = (
+        "⚙️ MÉTRIQUES OPÉRATIONNELLES\n\n"
+        f"• Offload Moyen: {metrics['avg_offload']:.1%}\n"
+        f"• Offload Max: {metrics['max_offload']:.1%}\n"
+        f"• Tâches Fog: {metrics['total_fog_tasks']}\n"
+        f"• Tâches Cloud: {metrics['total_offloaded_tasks']}\n"
+        f"• Changements Scaling: {metrics['num_scaling']}\n"
+        f"• Fréquence Scaling: {metrics['scaling_frequency']:.2f}/tick\n"
+        f"• Efficacité Fog: {metrics['fog_efficiency']:.1%}\n"
+        f"• Coût Estimé: ${metrics['estimated_cost']:.2f}"
+    )
+    
+    ax.text(0.1, 0.9, text, transform=ax.transAxes,
+           fontsize=11, verticalalignment='top',
+           bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.3))
+    
+    ax.set_title("⑥ MÉTRIQUES OPÉRATIONNELLES", fontsize=12, fontweight='bold', pad=10)
+
+
+def plot_prediction_errors(ax, df, metrics):
+    """Graphique d'analyse des erreurs de prédiction."""
+    # Erreur par niveau de pression
+    df['pred_error'] = df['pressure'] - df['predicted_pressure']
+    df['pressure_bin'] = pd.cut(df['pressure'], bins=[0, 0.3, 0.7, 1.0, 2.0, 5.0])
+    
+    if df['pressure_bin'].notna().any():
+        error_by_bin = df.groupby('pressure_bin')['pred_error'].agg(['mean', 'std', 'count'])
+        
+        x_pos = np.arange(len(error_by_bin))
+        ax.bar(x_pos, error_by_bin['mean'], yerr=error_by_bin['std'],
+              capsize=5, color='skyblue', edgecolor='navy', alpha=0.7)
+        
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels([str(bin) for bin in error_by_bin.index], rotation=45, ha='right')
+        ax.axhline(y=0, color='black', linestyle='-', linewidth=1)
+        
+        # Annoter le nombre d'échantillons
+        for i, (idx, row) in enumerate(error_by_bin.iterrows()):
+            ax.text(i, row['mean'] + (row['std'] if not np.isnan(row['std']) else 0),
+                   f"n={int(row['count'])}", ha='center', fontsize=8)
+    
+    ax.set_ylabel("Erreur (Réel - Prédit)", fontsize=10)
+    ax.set_xlabel("Bins de Pression", fontsize=10)
+    ax.set_title("⑦ ANALYSE DES ERREURS DE PRÉDICTION", fontsize=12, fontweight='bold', pad=10)
+    ax.grid(True, alpha=0.3)
+
+
+def plot_decision_heatmap(ax, df):
+    """Heatmap des décisions dans le temps."""
+    # Préparer les données pour le heatmap
+    decisions_map = {'none': 0, 'up': 1, 'down': 2, 'emergency_up': 3}
+    df['decision_code'] = df['scale_decision'].map(decisions_map)
+    
+    # Créer une matrice pour le heatmap
+    time_bins = 20
+    bin_size = len(df) // time_bins
+    if bin_size == 0:
+        bin_size = 1
+    
+    heatmap_data = []
+    for i in range(0, len(df), bin_size):
+        bin_data = df.iloc[i:i+bin_size]
+        avg_pressure = bin_data['pressure'].mean()
+        avg_offload = bin_data['offload_ratio'].mean()
+        dominant_decision = bin_data['decision_code'].mode()[0] if not bin_data.empty else 0
+        heatmap_data.append([avg_pressure, avg_offload, dominant_decision])
+    
+    if heatmap_data:
+        heatmap_array = np.array(heatmap_data).T
+        
+        im = ax.imshow(heatmap_array, aspect='auto', cmap='RdYlBu_r',
+                      interpolation='nearest')
+        
+        # Labels
+        ax.set_ylabel("Mesure")
+        ax.set_yticks([0, 1, 2])
+        ax.set_yticklabels(['Pression', 'Offload', 'Décision'])
+        ax.set_xlabel("Fenêtres Temporelles")
+        
+        # Barre de couleur
+        plt.colorbar(im, ax=ax, orientation='vertical', pad=0.02)
+    
+    ax.set_title("⑧ HEATMAP DES DÉCISIONS DANS LE TEMPS", fontsize=12, fontweight='bold', pad=10)
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Génère des graphiques à partir des résultats de simulation.")
+    parser = argparse.ArgumentParser(
+        description="Génère des graphiques d'analyse détaillée à partir des résultats de simulation."
+    )
     parser.add_argument(
         "--input",
         required=True,
@@ -115,7 +378,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output",
         required=True,
-        help="Chemin pour sauvegarder l'image PNG (ex: images/results_up.png)"
+        help="Chemin pour sauvegarder l'image PNG (ex: images/analysis_up.png)"
+    )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Afficher les métriques détaillées dans la console"
     )
     args = parser.parse_args()
 

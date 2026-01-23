@@ -1,0 +1,11 @@
+.idea/
+__pycache__/
+backup/
+log*/
+.venv/
+test.py
+.vscode/
+.DS_Store
+
+*.sh
+toy_debug.py
