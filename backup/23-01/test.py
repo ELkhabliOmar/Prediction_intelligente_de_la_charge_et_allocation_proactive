@@ -1,19 +1,31 @@
-# test.py - SIMULATEUR INTÉGRÉ FOG-CLOUD (CORRIGÉ + STABLE + COMPAT LSTM/DQN)
-# - Charge correctement EnhancedLSTM (train_lstm.py) et DQN (train_dqn.py)
-# - Planner plus stable: EMA + cooldown + hysteresis renforcée
-# - Logs + métriques: indique si fallback LSTM/DQN a été utilisé
+# test.py - SIMULATEUR INTÉGRÉ FOG-CLOUD (MULTI-FOG + MULTI-CLOUD)
+# ✅ Compatible train_lstm.py (EnhancedLSTM checkpoint enrichi) et train_dqn.py (DQN checkpoint)
+# ✅ Multi-Fog + Multi-Cloud (France/Europe)
+# ✅ Pression globale (pool fog) pour LSTM/Planner
+# ✅ Placement Fog -> Fog le moins chargé
+# ✅ Placement Cloud -> Round-robin sur clouds
+# ✅ Planner = pool scaling: scale sur 1 fog (UP: plus chargé, DOWN: moins chargé)
+# ✅ IMPORTANT: DQN normalisation identique au training (fog_cpu_norm = fog_cpu / 200.0)
 
 import argparse
 import csv
 import os
 import random
 import warnings
+import math
 from collections import deque, defaultdict
-from typing import Dict, List, Any, DefaultDict, Optional
+from typing import Dict, List, Any, DefaultDict, Optional, Tuple
 
 import torch
 import torch.nn as nn
 import numpy as np
+
+from config import (
+    DEFAULT_WORKLOAD,
+    DEFAULT_LSTM,
+    DEFAULT_DQN,
+    DEFAULT_RESULTS,
+)
 
 warnings.filterwarnings("ignore")
 
@@ -36,7 +48,6 @@ except ImportError:
             self.resource_management_algorithm_parameters = None
 
         def run_model(self):
-            # Stub: ne simule pas réellement
             pass
 
     class EdgeServer:
@@ -66,7 +77,8 @@ except ImportError:
             self.application = None
             self.image = None
             self.model = None
-            self.placed_on = None
+            self.placed_on = None         # "Fog" / "Cloud"
+            self.placed_on_server = None  # EdgeServer instance
             self.duration = 0
 
         def provision(self, server):
@@ -141,12 +153,12 @@ class EnhancedLSTM(nn.Module):
 # DQN (doit matcher train_dqn.py)
 # =========================================================
 class DQN(nn.Module):
-    def __init__(self, input_dim=5, output_dim=2, hidden_dim=128):
+    def __init__(self, input_dim=5, output_dim=2, hidden_dim=128, dropout=0.1):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.1),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, output_dim),
@@ -158,8 +170,6 @@ class DQN(nn.Module):
 
 # =========================================================
 # Module 1: LSTM Predictor (robuste + compat)
-# - checkpoint attendu (train_lstm corrigé): state_dict, seq_len, max_util, hidden_dim, num_layers, dropout, arch="EnhancedLSTM"
-# - fallback: persistence améliorée si chargement échoue
 # =========================================================
 class Module1_LSTMPredictor:
     def __init__(self, model_path: str, horizons=None, device="cpu"):
@@ -167,14 +177,12 @@ class Module1_LSTMPredictor:
         self.model_path = model_path
         self.device = device
 
-        # defaults (seront remplacés si checkpoint présent)
         self.seq_len = 30
         self.max_util = 1.0
         self.hidden_dim = 128
         self.num_layers = 2
         self.dropout = 0.3
         self.model_loaded = False
-
         self.model: Optional[nn.Module] = None
 
         if os.path.exists(model_path):
@@ -187,13 +195,11 @@ class Module1_LSTMPredictor:
                 self.dropout = float(ckpt.get("dropout", self.dropout))
                 arch = ckpt.get("arch", "EnhancedLSTM")
 
-                # garde-fous
                 if self.max_util <= 0.1:
                     self.max_util = 1.0
                 if self.max_util > 10.0:
                     print(f"[Module1] ⚠️ max_util aberrant ({self.max_util:.3f}) -> clamp à 5.0")
                     self.max_util = 5.0
-
                 if arch != "EnhancedLSTM":
                     print(f"[Module1] ⚠️ arch={arch} non reconnu -> tentative EnhancedLSTM")
 
@@ -226,7 +232,6 @@ class Module1_LSTMPredictor:
         return float(max(0.01, arr.std()))
 
     def predict(self, pressure_history: deque) -> Dict[int, Dict[str, float]]:
-        # On travaille sur une pression "capée" pour éviter explosion numérique
         hist_all = list(pressure_history)
         if len(hist_all) < 3:
             return {h: {"prediction": 0.10, "uncertainty": 0.05, "used_fallback": True} for h in self.horizons}
@@ -235,43 +240,34 @@ class Module1_LSTMPredictor:
         last5 = hist_all[-5:] if len(hist_all) >= 5 else hist_all
         mean_last_5 = float(sum(last5) / len(last5))
 
-        # fallback persistence améliorée
         if not self.model_loaded or self.model is None:
-            # décroissance si faible charge
-            if last_p < 0.2 and mean_last_5 < 0.3:
-                pred = max(0.0, last_p * 0.7)
-            else:
-                pred = last_p
-
+            pred = max(0.0, last_p * 0.7) if (last_p < 0.2 and mean_last_5 < 0.3) else last_p
             unc = max(0.05, 0.08 + 0.08 * min(pred, 2.0))
-            return {h: {"prediction": float(pred), "uncertainty": float(min(unc + 0.01 * h, 0.5)), "used_fallback": True}
-                    for h in self.horizons}
+            return {
+                h: {"prediction": float(pred), "uncertainty": float(min(unc + 0.01 * h, 0.5)), "used_fallback": True}
+                for h in self.horizons
+            }
 
-        # préparer séquence
         seq_len = self.seq_len
         hist = hist_all[-seq_len:]
         if len(hist) < seq_len:
             hist = [hist[-1]] * (seq_len - len(hist)) + hist
 
-        # clip réaliste pour l'entrée
         hist_clip = [max(0.0, min(x, 3.0)) for x in hist]
         hist_norm = [max(0.0, min(x / self.max_util, 3.0)) for x in hist_clip]
 
         x = torch.tensor(hist_norm, dtype=torch.float32).view(1, seq_len, 1).to(self.device)
-
         with torch.no_grad():
             y_norm = float(self.model(x).item())
 
         pred_p = max(0.0, y_norm * self.max_util)
 
-        # garde-fous anti “explosion”
         if mean_last_5 < 0.3:
             pred_p = min(pred_p, mean_last_5 * 2.0 + 0.3)
         if last_p < 0.1 and pred_p > 0.5:
             pred_p *= 0.3
         pred_p = min(pred_p, 3.0)
 
-        # blend si saut trop brutal
         if abs(pred_p - last_p) > 1.0:
             pred_p = 0.7 * last_p + 0.3 * pred_p
 
@@ -289,20 +285,10 @@ class Module1_LSTMPredictor:
 
 
 # =========================================================
-# Module 2: Proactive Planner (STABLE)
-# - EMA sur predicted_active_cpu
-# - cooldown pour éviter scaling trop fréquent
-# - hysteresis + scale-down plus agressif si pression basse durable
+# Module 2: Proactive Planner (pool scaling)
 # =========================================================
 class Module2_ProactivePlanner:
-    def __init__(
-        self,
-        target_util=0.70,
-        min_fog_cpu=30,
-        ema_alpha=0.25,
-        cooldown_windows=2,
-        max_scale_mult=4.0,
-    ):
+    def __init__(self, target_util=0.70, min_fog_cpu=30, ema_alpha=0.25, cooldown_windows=2, max_scale_mult=4.0):
         self.target_util = float(target_util)
         self.min_fog_cpu = int(min_fog_cpu)
         self.ema_alpha = float(ema_alpha)
@@ -313,109 +299,71 @@ class Module2_ProactivePlanner:
         self.ema_predicted_active_cpu: Optional[float] = None
 
         print(
-            f"[Module2] Planner stable: target_util={self.target_util}, min_fog_cpu={self.min_fog_cpu}, "
+            f"[Module2] Planner pool: target_util={self.target_util}, min_fog_cpu={self.min_fog_cpu}, "
             f"EMAα={self.ema_alpha}, cooldown_windows={self.cooldown_windows}, max_scale_mult={self.max_scale_mult}"
         )
 
-    def plan(
-        self,
-        predictions: Dict[int, Dict[str, float]],
-        fog_node: EdgeServer,
-        total_incoming_demand: float,
-        current_pressure: float,
-        current_t: int,
-        W_window: int,
-    ) -> Dict[str, Any]:
+    def plan(self, predictions, total_fog_capacity, total_incoming_demand, current_pressure, current_t, W_window):
         pred_h5 = predictions.get(5, {"prediction": current_pressure, "uncertainty": 0.10})
         pred_p = float(pred_h5.get("prediction", current_pressure))
         unc = float(pred_h5.get("uncertainty", 0.10))
 
-        # robust_p capé
         robust_p = min(max(pred_p + unc, 0.0), 3.0)
 
-        base_cpu = getattr(fog_node, "base_cpu", fog_node.cpu)
-        current_cpu = float(fog_node.cpu)
+        current_cap = float(max(1.0, total_fog_capacity))
+        predicted_active_cpu = (robust_p * current_cap) + float(total_incoming_demand)
 
-        max_cap = max(float(base_cpu) * self.max_scale_mult, current_cpu)
-        min_cap = max(self.min_fog_cpu, int(float(base_cpu) * 0.4))
-
-        predicted_active_cpu = (robust_p * current_cpu) + float(total_incoming_demand)
-
-        # EMA pour éviter les oscillations
         if self.ema_predicted_active_cpu is None:
             self.ema_predicted_active_cpu = predicted_active_cpu
         else:
             self.ema_predicted_active_cpu = (
                 self.ema_alpha * predicted_active_cpu + (1.0 - self.ema_alpha) * self.ema_predicted_active_cpu
             )
-
         ema_cpu = float(self.ema_predicted_active_cpu)
 
-        # CPU requis pour target_util
         required_cpu = ema_cpu / max(self.target_util, 0.3)
-        required_cpu = min(required_cpu, max_cap)
 
-        # cooldown en "fenêtres MAPE"
         cooldown_ticks = max(1, W_window) * self.cooldown_windows
         in_cooldown = (current_t - self.last_scale_t) < cooldown_ticks
 
         decision = "none"
         reason = "within band"
-        next_cpu = int(current_cpu)
 
-        # hysteresis plus forte
-        up_th = 1.35
-        down_th = 0.55
+        up_th = 1.20
+        down_th = 0.70
 
         if not in_cooldown:
-            # Scale up si vraiment nécessaire
-            if required_cpu > current_cpu * up_th and current_cpu < max_cap:
+            if required_cpu > current_cap * up_th:
                 decision = "up"
-                reason = f"required_cpu({required_cpu:.1f}) > {up_th}*current_cpu({current_cpu:.1f})"
-            # Scale down si clairement sur-provisionné
-            elif required_cpu < current_cpu * down_th and current_cpu > min_cap:
+                reason = f"required_cpu({required_cpu:.1f}) > {up_th}*cap({current_cap:.1f})"
+            elif required_cpu < current_cap * down_th:
                 decision = "down"
-                reason = f"required_cpu({required_cpu:.1f}) < {down_th}*current_cpu({current_cpu:.1f})"
-            # si pression très faible: down plus probable
-            elif current_pressure < 0.15 and current_cpu > min_cap:
+                reason = f"required_cpu({required_cpu:.1f}) < {down_th}*cap({current_cap:.1f})"
+            elif current_pressure < 0.15:
                 decision = "down"
                 reason = f"very low pressure({current_pressure:.2f})"
 
-        # pas de petits steps: steps adaptatifs
-        step_up = max(20, int(current_cpu * 0.25))
-        step_down = max(20, int(current_cpu * 0.20))
-
-        if decision == "up":
-            next_cpu = int(min(max_cap, current_cpu + step_up))
-            self.last_scale_t = current_t
-        elif decision == "down":
-            # down plus agressif si très faible charge
-            if current_pressure < 0.10:
-                step_down = max(step_down, int(current_cpu * 0.30))
-            next_cpu = int(max(min_cap, current_cpu - step_down))
-            self.last_scale_t = current_t
-
-        # Offload ratio (raisonnable + safety)
         offload_ratio = 0.0
         offload_reason = "no offload"
 
-        demand_vs_capacity = ema_cpu / max(next_cpu, 1)
+        demand_vs_capacity = ema_cpu / max(current_cap, 1.0)
         if demand_vs_capacity > 1.0:
-            excess_ratio = min(1.0, (demand_vs_capacity - 1.0) * 0.6)
-            offload_ratio = max(offload_ratio, min(0.85, excess_ratio))
+            excess_ratio = min(1.0, (demand_vs_capacity - 1.0) * 0.4)
+            offload_ratio = min(0.60, excess_ratio)
             offload_reason = f"demand/capacity={demand_vs_capacity:.2f}"
 
-        # Safety net si surcharge
         if current_pressure > 1.0:
-            safety_offload = 0.35 + 0.18 * (current_pressure - 1.0)
-            safety_offload = min(0.85, safety_offload)
+            safety_offload = 0.20 + 0.10 * (current_pressure - 1.0)
+            safety_offload = min(0.60, safety_offload)
             offload_ratio = max(offload_ratio, safety_offload)
             offload_reason += f" | SAFETY pressure={current_pressure:.2f}"
 
-        # si charge vraiment basse
-        if ema_cpu < float(base_cpu) * 0.10:
+        if ema_cpu < current_cap * 0.15:
             offload_ratio = 0.0
             offload_reason = "very low demand"
+
+        if decision in ("up", "down"):
+            self.last_scale_t = current_t
 
         return {
             "robust_pred": float(robust_p),
@@ -423,16 +371,13 @@ class Module2_ProactivePlanner:
             "ema_active_cpu": float(ema_cpu),
             "scale_decision": decision,
             "scale_reason": reason + (f" | cooldown({cooldown_ticks})" if in_cooldown else ""),
-            "next_cpu": int(next_cpu),
             "offload_ratio": float(offload_ratio),
             "offload_reason": offload_reason,
         }
 
 
 # =========================================================
-# Module 3: Scheduler (DQN + baseline)
-# - Charge DQN matching train_dqn.py
-# - Normalisation identique au training
+# Module 3: Scheduler (DQN + baseline) — NORMALISATION IDENTIQUE AU TRAINING
 # =========================================================
 class Module3_Scheduler:
     def __init__(self, dqn_path: str = None, cpu_threshold_cloud=300, warmup_ticks=15):
@@ -445,17 +390,19 @@ class Module3_Scheduler:
         self.max_fallback = 25
 
         self.hidden_dim = 128
+        self.dropout = 0.1
         self.dqn = None
 
         if dqn_path and os.path.exists(dqn_path):
             try:
                 ckpt = torch.load(dqn_path, map_location="cpu")
                 self.hidden_dim = int(ckpt.get("hidden_dim", 128))
-                self.dqn = DQN(input_dim=5, output_dim=2, hidden_dim=self.hidden_dim)
+                self.dropout = float(ckpt.get("dropout", 0.1))
+                self.dqn = DQN(input_dim=5, output_dim=2, hidden_dim=self.hidden_dim, dropout=self.dropout)
                 self.dqn.load_state_dict(ckpt["state_dict"], strict=True)
                 self.dqn.eval()
                 self.use_dqn = True
-                print(f"[Module3] ✅ DQN chargé: {dqn_path} (hidden_dim={self.hidden_dim})")
+                print(f"[Module3] ✅ DQN chargé: {dqn_path} (hidden_dim={self.hidden_dim}, dropout={self.dropout})")
             except Exception as e:
                 print(f"[Module3] ❌ Erreur chargement DQN ({e}) -> baseline")
                 self.use_dqn = False
@@ -471,21 +418,17 @@ class Module3_Scheduler:
             return "Cloud"
         return "Fog"
 
-    def decide(self, task_cpu: int, task_ram: int, pressure: float, fog_cpu: int, offload_ratio: float, t: int) -> (str, bool):
-        # retourne (decision, used_fallback_dqn)
-        if t <= self.warmup_ticks or not self.use_dqn or self.dqn is None or self.dqn_fallback_count >= self.max_fallback:
+    def decide(self, task_cpu: int, task_ram: int, pressure: float, fog_cpu: int, offload_ratio: float, t: int) -> Tuple[str, bool]:
+        if t <= self.warmup_ticks or (not self.use_dqn) or (self.dqn is None) or (self.dqn_fallback_count >= self.max_fallback):
             return self.baseline(task_cpu, offload_ratio, pressure), True
 
-        # Normalisation IDENTIQUE AU TRAINING DQN
+        # ✅ EXACTEMENT comme train_dqn.py
         cpu_norm = min(float(task_cpu) / 500.0, 2.0)
         ram_norm = min(float(task_ram) / 4096.0, 2.0)
         pressure_clip = min(max(float(pressure), 0.0), 3.0)
-        fog_cpu_norm = float(fog_cpu) / 200.0  # 100->0.5
+        fog_cpu_norm = float(fog_cpu) / 200.0  # identique training
 
-        state = torch.tensor(
-            [cpu_norm, ram_norm, pressure_clip, fog_cpu_norm, float(offload_ratio)],
-            dtype=torch.float32
-        ).unsqueeze(0)
+        state = torch.tensor([cpu_norm, ram_norm, pressure_clip, fog_cpu_norm, float(offload_ratio)], dtype=torch.float32).unsqueeze(0)
 
         try:
             with torch.no_grad():
@@ -508,16 +451,77 @@ def load_workload_indexed(path: str) -> DefaultDict[int, List[dict]]:
     with open(path, "r", newline="", encoding="utf-8") as f:
         r = csv.DictReader(f)
         for row in r:
-            task = {
-                "task_id": int(row["task_id"]),
-                "timestamp": int(row["timestamp"]),
-                "service_type": row.get("service_type", "NA"),
-                "cpu_demand": int(row["cpu_demand"]),
-                "ram_demand": int(row["ram_demand"]),
-                "duration": int(row["duration"]),
-            }
+            task = _normalize_task_row(row)
             idx[task["timestamp"]].append(task)
     return idx
+
+
+def _normalize_task_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    if "task_id" in row and "timestamp" in row:
+        return {
+            "task_id": int(row["task_id"]),
+            "timestamp": int(float(row["timestamp"])),
+            "service_type": row.get("service_type", "NA"),
+            "cpu_demand": int(float(row["cpu_demand"])),
+            "ram_demand": int(float(row["ram_demand"])),
+            "duration": int(float(row["duration"])),
+        }
+
+    task_size = float(row.get("TaskSize", 0.0))
+    cycles_per_bit = float(row.get("CyclesPerBit", 0.0))
+    trans_rate = max(1.0, float(row.get("TransBitRate", 1.0)))
+
+    cpu_scale = 3000.0
+    ram_scale = 1.0
+
+    cpu_demand = int(max(1.0, (task_size * cycles_per_bit) / cpu_scale))
+    ram_demand = int(max(64.0, task_size * ram_scale))
+    duration = int(max(1.0, math.ceil(task_size / trans_rate)))
+
+    return {
+        "task_id": int(float(row.get("TaskID", 0))),
+        "timestamp": int(float(row.get("GenerationTime", 0.0))),
+        "service_type": row.get("DataType", row.get("DeviceType", "NA")),
+        "cpu_demand": cpu_demand,
+        "ram_demand": ram_demand,
+        "duration": duration,
+    }
+
+
+# =========================================================
+# Multi-node helper functions
+# =========================================================
+def active_cpu_on_server(active_services: List[Service], server: EdgeServer) -> int:
+    return int(sum(s.cpu_demand for s in active_services if getattr(s, "placed_on_server", None) == server))
+
+
+def pressure_server(active_services: List[Service], server: EdgeServer) -> float:
+    cpu = active_cpu_on_server(active_services, server)
+    return float(cpu) / max(1.0, float(server.cpu))
+
+
+def pick_best_fog(fogs: List[EdgeServer], active_services: List[Service]) -> Tuple[EdgeServer, float]:
+    best = fogs[0]
+    best_p = pressure_server(active_services, best)
+    for f in fogs[1:]:
+        p = pressure_server(active_services, f)
+        if p < best_p:
+            best, best_p = f, p
+    return best, best_p
+
+
+def pick_most_loaded_fog(fogs: List[EdgeServer], active_services: List[Service]) -> Tuple[EdgeServer, float]:
+    worst = fogs[0]
+    worst_p = pressure_server(active_services, worst)
+    for f in fogs[1:]:
+        p = pressure_server(active_services, f)
+        if p > worst_p:
+            worst, worst_p = f, p
+    return worst, worst_p
+
+
+def pick_least_loaded_fog(fogs: List[EdgeServer], active_services: List[Service]) -> Tuple[EdgeServer, float]:
+    return pick_best_fog(fogs, active_services)
 
 
 # =========================================================
@@ -537,42 +541,26 @@ MODULE2: Optional[Module2_ProactivePlanner] = None
 MODULE3: Optional[Module3_Scheduler] = None
 
 W_WINDOW = 10
+CLOUD_RR = 0
 
 
 def proactive_placement_algorithm(parameters):
-    global CURRENT_T, ACTIVE_SERVICES, PRESSURE_HISTORY, PREDICTIONS, PLAN, SIMULATION_METRICS
+    global CURRENT_T, ACTIVE_SERVICES, PRESSURE_HISTORY, PREDICTIONS, PLAN, SIMULATION_METRICS, CLOUD_RR
+
     simulator = parameters["simulator"]
 
-    # Récupération des nœuds
-    fog_node = None
-    cloud_node = None
-    for s in EdgeServer.all():
-        if "fog" in s.name.lower():
-            fog_node = s
-        if "cloud" in s.name.lower():
-            cloud_node = s
+    fogs = [s for s in EdgeServer.all() if "fog" in s.name.lower()]
+    clouds = [s for s in EdgeServer.all() if "cloud" in s.name.lower()]
 
-    if fog_node is None or cloud_node is None:
-        print("[ERROR] Nœuds Fog ou Cloud non trouvés!")
+    if not fogs or not clouds:
+        print("[ERROR] Pools Fog/Cloud non trouvés (vérifie les noms des serveurs).")
         return
 
-    if not hasattr(fog_node, "base_cpu"):
-        fog_node.base_cpu = fog_node.cpu
+    for f in fogs:
+        if not hasattr(f, "base_cpu"):
+            f.base_cpu = f.cpu
 
-    # ---- 0) Emergency scaling si pression critique ----
-    active_cpu_fog_check = sum(s.cpu_demand for s in ACTIVE_SERVICES if getattr(s, "placed_on", None) == "Fog")
-    pressure_check = active_cpu_fog_check / fog_node.cpu if fog_node.cpu > 0 else 0.0
-
-    if pressure_check > 1.25:
-        # autoriser plus haut que 3x pour éviter explosion > 5
-        max_cap_emergency = int(getattr(fog_node, "base_cpu", 100) * 5.0)
-        if fog_node.cpu < max_cap_emergency:
-            old_cpu = fog_node.cpu
-            fog_node.cpu = min(max_cap_emergency, fog_node.cpu + max(50, int(fog_node.cpu * 0.25)))
-            print(f"[t={CURRENT_T:02d}] 🚨 EMERGENCY UP: {old_cpu} -> {fog_node.cpu} (Pressure={pressure_check:.2f})")
-            PLAN["scale_decision"] = "emergency_up"
-
-    # ---- 1) Fin des services (durées) ----
+    # ---- 1) Fin des services ----
     remaining = []
     for s in ACTIVE_SERVICES:
         s.duration -= 1
@@ -583,6 +571,10 @@ def proactive_placement_algorithm(parameters):
     # ---- 2) Injection + Scheduling ----
     tasks_now = WORKLOAD_IDX.get(CURRENT_T, [])
     total_incoming_demand = sum(t["cpu_demand"] for t in tasks_now)
+
+    total_active_cpu_fog_before = sum(s.cpu_demand for s in ACTIVE_SERVICES if getattr(s, "placed_on", None) == "Fog")
+    total_fog_capacity_before = sum(int(f.cpu) for f in fogs)
+    pressure_global_before = float(total_active_cpu_fog_before) / max(1.0, float(total_fog_capacity_before))
 
     tasks_placed_fog_this_tick = 0
     tasks_placed_cloud_this_tick = 0
@@ -599,51 +591,70 @@ def proactive_placement_algorithm(parameters):
         service.application = app
         service.image = GLOBAL_IMAGE
         service.model = simulator
+        service.duration = int(task["duration"])
 
-        active_cpu_fog_before = sum(s.cpu_demand for s in ACTIVE_SERVICES if getattr(s, "placed_on", None) == "Fog")
-        pressure_before = active_cpu_fog_before / fog_node.cpu if fog_node.cpu > 0 else 0.0
+        # pression pool (pour décision globale)
+        total_active_cpu_fog = sum(s.cpu_demand for s in ACTIVE_SERVICES if getattr(s, "placed_on", None) == "Fog")
+        total_fog_capacity = sum(int(f.cpu) for f in fogs)
+        pressure_global = float(total_active_cpu_fog) / max(1.0, float(total_fog_capacity))
+
+        # ✅ Fog choisi AVANT le DQN, pour passer fog_cpu identique training
+        fog_choice, fog_choice_p = pick_best_fog(fogs, ACTIVE_SERVICES)
 
         decision, used_fallback_dqn = MODULE3.decide(
-            task_cpu=task["cpu_demand"],
-            task_ram=task["ram_demand"],
-            pressure=pressure_before,
-            fog_cpu=fog_node.cpu,
-            offload_ratio=PLAN.get("offload_ratio", 0.0),
-            t=CURRENT_T,
+            task_cpu=int(task["cpu_demand"]),
+            task_ram=int(task["ram_demand"]),
+            pressure=float(pressure_global),
+            fog_cpu=int(fog_choice.cpu),  # ✅ identique training: fog_cpu d'un fog (pas pool)
+            offload_ratio=float(PLAN.get("offload_ratio", 0.0)),
+            t=int(CURRENT_T),
         )
         if used_fallback_dqn:
             dqn_fallback_used_tick += 1
 
         service.placed_on = decision
+
         if decision == "Fog":
+            service.placed_on_server = fog_choice
             tasks_placed_fog_this_tick += 1
+            service.provision(fog_choice)
         else:
+            cloud_node = clouds[CLOUD_RR % len(clouds)]
+            CLOUD_RR += 1
+            service.placed_on_server = cloud_node
             tasks_placed_cloud_this_tick += 1
+            service.provision(cloud_node)
 
-        service.duration = task["duration"]
         ACTIVE_SERVICES.append(service)
-        service.provision(fog_node if decision == "Fog" else cloud_node)
 
-    # ---- 3) Monitoring ----
-    active_cpu_fog = sum(s.cpu_demand for s in ACTIVE_SERVICES if getattr(s, "placed_on", None) == "Fog")
-    pressure_real = active_cpu_fog / fog_node.cpu if fog_node.cpu > 0 else 0.0
+    # ---- 3) Monitoring global ----
+    total_active_cpu_fog = sum(s.cpu_demand for s in ACTIVE_SERVICES if getattr(s, "placed_on", None) == "Fog")
+    total_fog_capacity = sum(int(f.cpu) for f in fogs)
+    pressure_global_real = float(total_active_cpu_fog) / max(1.0, float(total_fog_capacity))
 
-    # pour l’historique LSTM, on clip à 3.0 (robuste)
-    PRESSURE_HISTORY.append(min(max(pressure_real, 0.0), 3.0))
+    PRESSURE_HISTORY.append(min(max(pressure_global_real, 0.0), 3.0))
 
-    print(f"[t={CURRENT_T:02d}] active_cpu_fog={active_cpu_fog:4d} fog_cpu={fog_node.cpu:4d} pressure={pressure_real:.2f}")
+    fog_pressures = [pressure_server(ACTIVE_SERVICES, f) for f in fogs]
+    worst_fog_p = max(fog_pressures) if fog_pressures else 0.0
+
+    print(
+        f"[t={CURRENT_T:03d}] pool_fog: active_cpu={total_active_cpu_fog:5d} "
+        f"cap={total_fog_capacity:5d} pressure={pressure_global_real:.2f} worst_fog={worst_fog_p:.2f} "
+        f"| placed: fog={tasks_placed_fog_this_tick:3d} cloud={tasks_placed_cloud_this_tick:3d}"
+    )
 
     pred_h5 = PREDICTIONS.get(5, {})
     SIMULATION_METRICS.append({
-        "t": CURRENT_T,
-        "active_cpu_fog": int(active_cpu_fog),
-        "fog_capacity": int(fog_node.cpu),
-        "pressure": float(pressure_real),  # vraie pression (peut dépasser 3)
-        "predicted_pressure": float(pred_h5.get("prediction", pressure_real)),
+        "t": int(CURRENT_T),
+        "pool_active_cpu_fog": int(total_active_cpu_fog),
+        "pool_fog_capacity": int(total_fog_capacity),
+        "pool_pressure": float(pressure_global_real),
+        "worst_fog_pressure": float(worst_fog_p),
+        "predicted_pressure": float(pred_h5.get("prediction", pressure_global_real)),
         "prediction_uncertainty": float(pred_h5.get("uncertainty", 0.10)),
         "lstm_fallback_used": int(pred_h5.get("used_fallback", True)) if pred_h5 else 1,
         "dqn_fallback_used_tasks": int(dqn_fallback_used_tick),
-        "scale_decision": PLAN.get("scale_decision", "none"),
+        "scale_decision": str(PLAN.get("scale_decision", "none")),
         "offload_ratio": float(PLAN.get("offload_ratio", 0.0)),
         "offload_reason": str(PLAN.get("offload_reason", "")),
         "tasks_on_fog": int(sum(1 for s in ACTIVE_SERVICES if getattr(s, "placed_on", None) == "Fog")),
@@ -659,19 +670,30 @@ def proactive_placement_algorithm(parameters):
 
         PLAN = MODULE2.plan(
             predictions=PREDICTIONS,
-            fog_node=fog_node,
-            total_incoming_demand=total_incoming_demand,
+            total_fog_capacity=float(total_fog_capacity),
+            total_incoming_demand=float(total_incoming_demand),
             current_pressure=float(current_p_clip),
-            current_t=CURRENT_T,
-            W_window=W_WINDOW,
+            current_t=int(CURRENT_T),
+            W_window=int(W_WINDOW),
         )
 
         if PLAN["scale_decision"] in ("up", "down"):
-            old_cpu = fog_node.cpu
-            fog_node.cpu = int(PLAN["next_cpu"])
-            print(f"[t={CURRENT_T}] Scaling: {old_cpu} -> {fog_node.cpu} ({PLAN['scale_decision']})")
+            if PLAN["scale_decision"] == "up":
+                target_fog, p = pick_most_loaded_fog(fogs, ACTIVE_SERVICES)
+                step = max(20, int(target_fog.cpu * 0.25))
+                max_cap = int(getattr(target_fog, "base_cpu", target_fog.cpu) * MODULE2.max_scale_mult)
+                old = int(target_fog.cpu)
+                target_fog.cpu = int(min(max_cap, target_fog.cpu + step))
+                print(f"[t={CURRENT_T:03d}] Scaling UP on {target_fog.name}: {old} -> {target_fog.cpu} (p={p:.2f})")
+            else:
+                target_fog, p = pick_least_loaded_fog(fogs, ACTIVE_SERVICES)
+                step = max(20, int(target_fog.cpu * 0.20))
+                min_cap = max(int(MODULE2.min_fog_cpu), int(getattr(target_fog, "base_cpu", target_fog.cpu) * 0.4))
+                old = int(target_fog.cpu)
+                target_fog.cpu = int(max(min_cap, target_fog.cpu - step))
+                print(f"[t={CURRENT_T:03d}] Scaling DOWN on {target_fog.name}: {old} -> {target_fog.cpu} (p={p:.2f})")
 
-        print(f"\n[t={CURRENT_T}] === Cycle MAPE ===")
+        print(f"\n[t={CURRENT_T:03d}] === Cycle MAPE (pool) ===")
         print("  Predictions (pressure + incertitude):")
         for h in sorted(PREDICTIONS.keys()):
             p = PREDICTIONS[h]["prediction"]
@@ -688,7 +710,7 @@ def proactive_placement_algorithm(parameters):
 
 
 def main():
-    global WORKLOAD_IDX, MODULE1, MODULE2, MODULE3, W_WINDOW, CURRENT_T, ACTIVE_SERVICES, PRESSURE_HISTORY, PLAN, SIMULATION_METRICS
+    global WORKLOAD_IDX, MODULE1, MODULE2, MODULE3, W_WINDOW, CURRENT_T, ACTIVE_SERVICES, PRESSURE_HISTORY, PLAN, SIMULATION_METRICS, CLOUD_RR
 
     if not EDGE_SIM_AVAILABLE:
         print("❌ edge-sim-py n'est pas installé. Simulation impossible.")
@@ -696,22 +718,23 @@ def main():
         return
 
     CURRENT_T = 0
+    CLOUD_RR = 0
     ACTIVE_SERVICES = []
     PRESSURE_HISTORY = deque(maxlen=200)
     SIMULATION_METRICS = []
     PLAN = {"scale_decision": "none", "offload_ratio": 0.0}
 
-    ap = argparse.ArgumentParser(description="Simulateur Fog-Cloud avec approche proactive (corrigé)")
-    ap.add_argument("--workload", default=os.path.join("data", "workload.csv"))
-    ap.add_argument("--lstm_model", default=os.path.join("models", "lstm_util.pth"))
-    ap.add_argument("--dqn_model", default=os.path.join("models", "dqn_fog_cloud.pth"))
-    ap.add_argument("--fog_cpu", type=int, default=100)
+    ap = argparse.ArgumentParser(description="Simulateur multi-Fog / multi-Cloud (proactif)")
+    ap.add_argument("--workload", default=DEFAULT_WORKLOAD)
+    ap.add_argument("--lstm_model", default=DEFAULT_LSTM)
+    ap.add_argument("--dqn_model", default=DEFAULT_DQN)
     ap.add_argument("--ticks", type=int, default=200)
     ap.add_argument("--W", type=int, default=10)
     ap.add_argument("--target_util", type=float, default=0.70)
     ap.add_argument("--min_fog_cpu", type=int, default=30)
-    ap.add_argument("--output_csv", default=None)
+    ap.add_argument("--output_csv", default=DEFAULT_RESULTS)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--fog_scale", type=float, default=1.0, help="multiplie la CPU de chaque fog (ex: 1.0, 1.5, 2.0)")
     args = ap.parse_args()
 
     random.seed(args.seed)
@@ -739,77 +762,93 @@ def main():
 
     simulator = Simulator(tick_duration=1, tick_unit="seconds")
 
-    cloud = EdgeServer(cpu=1000, memory=100000, disk=100000)
-    cloud.name = "Cloud-AWS"
-    cloud.coordinates = [10, 10]
+    # -----------------------------
+    # Création MULTI-FOG + MULTI-CLOUD (France/Europe)
+    # -----------------------------
+    # 5 Fog nodes (f0..f4) = régionaux, ressources moyennes
+    fog_specs = [
+        ("Fog-Paris",     [48.8566,  2.3522], 120),
+        ("Fog-Lille",     [50.6292,  3.0573],  90),
+        ("Fog-Lyon",      [45.7640,  4.8357], 110),
+        ("Fog-Toulouse",  [43.6047,  1.4442], 100),
+        ("Fog-Bordeaux",  [44.8378, -0.5792],  95),
+    ]
+    for name, coord, cpu in fog_specs:
+        cpu_scaled = int(max(10, cpu * float(args.fog_scale)))
+        fog = EdgeServer(cpu=cpu_scaled, memory=8192, disk=20000)
+        fog.name = name
+        fog.coordinates = coord
+        fog.base_cpu = cpu_scaled
 
-    fog = EdgeServer(cpu=args.fog_cpu, memory=4096, disk=10000)
-    fog.name = "Fog-1"
-    fog.coordinates = [5, 5]
-    fog.base_cpu = args.fog_cpu
+    # 2 Cloud nodes (c0,c1) = très puissants, distants
+    cloud_specs = [
+        ("Cloud-FR", [48.8566, 2.3522], 1500),
+        ("Cloud-BE", [50.4738, 3.8038], 1500),
+    ]
+    for name, coord, cpu in cloud_specs:
+        cloud = EdgeServer(cpu=cpu, memory=200000, disk=200000)
+        cloud.name = name
+        cloud.coordinates = coord
 
     simulator.stopping_criterion = lambda sim: (globals()["CURRENT_T"] >= args.ticks)
 
-    print(f"\n{'='*70}")
-    print("DÉMARRAGE SIMULATION FOG-CLOUD PROACTIF (CORRIGÉ + STABLE)")
-    print(f"{'='*70}")
+    print(f"\n{'='*80}")
+    print("DÉMARRAGE SIMULATION MULTI-FOG / MULTI-CLOUD (PROACTIF + STABLE)")
+    print(f"{'='*80}")
+    fogs = [s for s in EdgeServer.all() if "fog" in s.name.lower()]
+    clouds = [s for s in EdgeServer.all() if "cloud" in s.name.lower()]
     print(f"Durée: {args.ticks} ticks | Fenêtre MAPE: {W_WINDOW}")
-    print(f"Fog initial: {args.fog_cpu} CPU | Cloud: 1000 CPU")
+    print(f"Fog nodes: {len(fogs)} | Cloud nodes: {len(clouds)}")
+    print("Fog capacities:", ", ".join([f"{f.name}={int(f.cpu)}" for f in fogs]))
+    print("Cloud capacities:", ", ".join([f"{c.name}={int(c.cpu)}" for c in clouds]))
     print(f"Target utilization: {args.target_util}")
-    print(f"{'='*70}\n")
+    print(f"{'='*80}\n")
 
     simulator.resource_management_algorithm = proactive_placement_algorithm
     simulator.resource_management_algorithm_parameters = {"simulator": simulator}
 
     try:
         simulator.run_model()
-        print(f"{'='*70}")
+        print(f"{'='*80}")
         print("SIMULATION TERMINÉE AVEC SUCCÈS")
-        print(f"{'='*70}")
+        print(f"{'='*80}")
     except Exception as e:
         print(f"\n❌ ERREUR pendant la simulation: {e}")
         import traceback
         traceback.print_exc()
 
-    # Stats finales (console)
     if SIMULATION_METRICS:
-        avg_pressure = sum(m["pressure"] for m in SIMULATION_METRICS) / len(SIMULATION_METRICS)
-        max_pressure = max(m["pressure"] for m in SIMULATION_METRICS)
-        avg_offload = sum(m["offload_ratio"] for m in SIMULATION_METRICS) / len(SIMULATION_METRICS)
+        avg_pressure = float(np.mean([m["pool_pressure"] for m in SIMULATION_METRICS]))
+        max_pressure = float(np.max([m["pool_pressure"] for m in SIMULATION_METRICS]))
+        avg_offload = float(np.mean([m["offload_ratio"] for m in SIMULATION_METRICS]))
 
-        fog_total = sum(m["tasks_placed_fog"] for m in SIMULATION_METRICS)
-        cloud_total = sum(m["tasks_placed_cloud"] for m in SIMULATION_METRICS)
+        fog_total = int(sum(m["tasks_placed_fog"] for m in SIMULATION_METRICS))
+        cloud_total = int(sum(m["tasks_placed_cloud"] for m in SIMULATION_METRICS))
 
-        scale_decisions = [m["scale_decision"] for m in SIMULATION_METRICS]
-        ups = scale_decisions.count("up") + scale_decisions.count("emergency_up")
-        downs = scale_decisions.count("down")
-
-        lstm_fallback_pct = sum(m.get("lstm_fallback_used", 1) for m in SIMULATION_METRICS) / len(SIMULATION_METRICS)
-        dqn_fallback_tasks = sum(m.get("dqn_fallback_used_tasks", 0) for m in SIMULATION_METRICS)
+        lstm_fallback_pct = float(np.mean([m.get("lstm_fallback_used", 1) for m in SIMULATION_METRICS]))
+        dqn_fallback_tasks = int(sum(m.get("dqn_fallback_used_tasks", 0) for m in SIMULATION_METRICS))
 
         print(f"\n📊 STATISTIQUES FINALES:")
-        print(f"  Pression moyenne: {avg_pressure:.2f}")
-        print(f"  Pression max: {max_pressure:.2f}")
-        print(f"  Offload moyen: {avg_offload:.2%}")
-        print(f"  Tâches Fog totales: {fog_total}")
-        print(f"  Tâches Cloud totales: {cloud_total}")
-        print(f"  Scaling UP: {ups} fois | Scaling DOWN: {downs} fois")
+        print(f"  Pool pressure moyenne: {avg_pressure:.2f}")
+        print(f"  Pool pressure max:     {max_pressure:.2f}")
+        print(f"  Offload moyen:         {avg_offload:.2%}")
+        print(f"  Tâches Fog totales:    {fog_total}")
+        print(f"  Tâches Cloud totales:  {cloud_total}")
         print(f"  LSTM fallback (ticks): {lstm_fallback_pct:.1%}")
         print(f"  DQN fallback (tâches): {dqn_fallback_tasks}")
 
     # Sauvegarde CSV
-    if args.output_csv:
+    if args.output_csv and SIMULATION_METRICS:
         output_path = args.output_csv
         out_dir = os.path.dirname(output_path)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
 
-        if SIMULATION_METRICS:
-            with open(output_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=SIMULATION_METRICS[0].keys())
-                writer.writeheader()
-                writer.writerows(SIMULATION_METRICS)
-            print(f"\n💾 Métriques de simulation sauvegardées dans: {output_path}")
+        with open(output_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=SIMULATION_METRICS[0].keys())
+            writer.writeheader()
+            writer.writerows(SIMULATION_METRICS)
+        print(f"\n💾 Métriques de simulation sauvegardées dans: {output_path}")
 
 
 if __name__ == "__main__":

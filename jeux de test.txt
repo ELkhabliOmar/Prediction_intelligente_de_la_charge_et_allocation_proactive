@@ -1,29 +1,4 @@
-****************************** Scale UP *************************************************
-task_id,timestamp,service_type,cpu_demand,ram_demand,duration
-0,0,Monitoring,290,200,40
-1,0,IrrigationControl,280,220,40
-2,0,Monitoring,270,180,40
-3,1,IrrigationControl,260,200,40
-4,1,Monitoring,250,160,40
-5,2,IrrigationControl,240,180,40
-6,2,Monitoring,230,150,40
-7,3,Monitoring,220,150,40
-8,4,IrrigationControl,210,150,40
-9,5,Monitoring,200,120,40
-10,6,IrrigationControl,190,120,40
-11,7,Monitoring,180,110,40
-12,8,IrrigationControl,170,110,40
-13,9,Monitoring,160,100,40
-****************************** Scale down *************************************************
-task_id,timestamp,service_type,cpu_demand,ram_demand,duration
-0,0,Monitoring,10,50,2
-1,0,IrrigationControl,12,60,2
-2,1,Monitoring,8,40,2
-3,2,IrrigationControl,15,55,2
-4,3,Monitoring,9,45,2
-5,4,IrrigationControl,11,50,2
-6,5,Monitoring,7,35,2
-7,6,IrrigationControl,14,60,2
-8,7,Monitoring,6,30,2
-9,8,IrrigationControl,13,55,2
-10,9,Monitoring,8,40,2
+pression pool (p = poolCPU / fog_capacity)
+robust_pred = pred + unc 
+puis required_cpu = ema_cpu / target_util
+seq_len=30 = le modèle regarde les 30 dernières valeurs (pression/charge) pour prédire la prochaine.

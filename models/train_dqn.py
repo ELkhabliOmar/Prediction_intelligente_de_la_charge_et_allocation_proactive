@@ -3,9 +3,18 @@ import os
 import csv
 import random
 import argparse
+import math
+import sys
+from pathlib import Path
 from collections import deque
 from typing import List, Dict
 
+# Ajout du dossier parent au path pour trouver config.py
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from config import *
 import torch
 import torch.nn as nn
 import numpy as np
@@ -13,7 +22,6 @@ import numpy as np
 
 class DQN(nn.Module):
     """
-    ARCH utilisée en train ET en test (compat).
     input: 5 features
     output: 2 actions (Fog/Cloud)
     """
@@ -48,19 +56,40 @@ def load_workload(path: str) -> List[Dict]:
     with open(path, "r", newline="", encoding="utf-8") as f:
         r = csv.DictReader(f)
         for row in r:
-            tasks.append({
-                "timestamp": int(row.get("timestamp", 0)),
-                "cpu_demand": int(row["cpu_demand"]),
-                "ram_demand": int(row["ram_demand"]),
-                "duration": int(row.get("duration", 1)),
-            })
+            tasks.append(_normalize_task_row(row))
     return tasks
+
+
+def _normalize_task_row(row: Dict) -> Dict:
+    if "cpu_demand" in row and "ram_demand" in row:
+        return {
+            "timestamp": int(float(row.get("timestamp", 0))),
+            "cpu_demand": int(float(row["cpu_demand"])),
+            "ram_demand": int(float(row["ram_demand"])),
+            "duration": int(float(row.get("duration", 1))),
+        }
+
+    task_size = float(row.get("TaskSize", 0.0))
+    cycles_per_bit = float(row.get("CyclesPerBit", 0.0))
+    trans_rate = max(1.0, float(row.get("TransBitRate", 1.0)))
+    cpu_scale = 3000.0
+    ram_scale = 1.0
+    cpu_demand = int(max(1.0, (task_size * cycles_per_bit) / cpu_scale))
+    ram_demand = int(max(64.0, task_size * ram_scale))
+    duration = int(max(1.0, math.ceil(task_size / trans_rate)))
+
+    return {
+        "timestamp": int(float(row.get("GenerationTime", 0.0))),
+        "cpu_demand": cpu_demand,
+        "ram_demand": ram_demand,
+        "duration": duration,
+    }
 
 
 def main():
     ap = argparse.ArgumentParser(description="Entraînement DQN Fog/Cloud (compatible test.py)")
-    ap.add_argument("--data", default=os.path.join("data", "workload.csv"))
-    ap.add_argument("--out", default=os.path.join("models", "dqn_fog_cloud.pth"))
+    ap.add_argument("--data", default=DEFAULT_TRAINSET, help="CSV dataset (trainset/testset Tuple30K)")
+    ap.add_argument("--out", default=DEFAULT_DQN, help="chemin de sauvegarde du modèle DQN")
     ap.add_argument("--fog_cpu", type=int, default=100)
     ap.add_argument("--steps", type=int, default=20000)
     ap.add_argument("--batch", type=int, default=128)
@@ -76,7 +105,7 @@ def main():
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
 
     if not os.path.exists(args.data):
-        raise FileNotFoundError(f"{args.data} introuvable. Lance generate_workload.py")
+        raise FileNotFoundError(f"{args.data} introuvable.")
 
     tasks = load_workload(args.data)
     if not tasks:
@@ -107,6 +136,7 @@ def main():
     eps_start, eps_end, eps_decay = 1.0, 0.01, 0.9995
     eps = eps_start
 
+    # état interne "pression" (env simplifié)
     pressure = 0.0
     DECAY = 0.95
 
@@ -129,7 +159,9 @@ def main():
         ram_norm = min(ram / 4096.0, 2.0)
         pressure_clip = min(max(pressure_val, 0.0), 3.0)
         fog_cpu_norm = fog_cpu / 200.0
-        return torch.tensor([cpu_norm, ram_norm, pressure_clip, fog_cpu_norm, offload_ratio], dtype=torch.float32, device=device)
+        # offload_ratio vient du planner en vrai, ici on le simule (mais on ne le rend pas 100% redondant)
+        return torch.tensor([cpu_norm, ram_norm, pressure_clip, fog_cpu_norm, offload_ratio],
+                            dtype=torch.float32, device=device)
 
     print("\n🎯 Début de l'entraînement...")
 
@@ -139,7 +171,8 @@ def main():
         ram = float(task["ram_demand"])
         dur = max(1.0, float(task.get("duration", 1)))
 
-        offload_ratio = min(0.5, pressure * 0.3)
+        # simule une consigne offload externe (simple)
+        offload_ratio = min(0.6, max(0.0, (pressure - 0.7) * 0.6))
         state = make_state(cpu, ram, pressure, args.fog_cpu, offload_ratio)
 
         if random.random() < eps:
@@ -169,6 +202,7 @@ def main():
         overload = max(0.0, pressure_next - 1.0)
         reward = - (LAMBDA_OVER * overload) - cloud_cost - fog_cost - latency_cost
 
+        # petits bonus
         if a == 0 and overload < 0.2:
             reward += 0.1
         elif a == 1 and pressure > 0.8:
