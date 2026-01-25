@@ -73,19 +73,9 @@ def print_table(headers: List[str], rows: List[List[str]], title: Optional[str] 
     print(c(line_bottom(), "magenta"))
 
 # ---------- Affichage tick ----------
-def print_tick(
-    t: int,
-    active_cpu: int,
-    cap: int,
-    pressure: float,
-    worst: float,
-    fog_n: int,
-    cloud_n: int,
-    fog_nodes: int = 0,
-    cloud_nodes: int = 0
-):
+def print_tick(t: int, active_cpu: int, cap: int, pressure: float, worst: float, fog_n: int, cloud_n: int):
     bar_len = 26
-    p = max(0.0, min(2.0, float(pressure)))  # bar 0..2
+    p = max(0.0, min(2.0, pressure))  # bar 0..2
     filled = int((p / 2.0) * bar_len)
     bar = "█" * filled + "░" * (bar_len - filled)
 
@@ -103,10 +93,8 @@ def print_tick(
         f"p={c(f'{pressure:.2f}', p_col, bold=True)} "
         f"{c(bar, p_col)} "
         f"worst={c(f'{worst:.2f}', 'magenta', bold=True)} "
-        f"| placed tasks fog={c(fog_n,'green',bold=True)} cloud={c(cloud_n,'blue',bold=True)} "
-        f"| nodes fog={c(fog_nodes,'green',bold=True)} cloud={c(cloud_nodes,'blue',bold=True)}"
+        f"| placed fog={c(fog_n,'green',bold=True)} cloud={c(cloud_n,'blue',bold=True)}"
     )
-
 
 def print_mape_block(t: int, predictions: Dict[int, Dict[str, float]], plan: Dict[str, Any]):
     rows = []
@@ -145,16 +133,12 @@ def print_final_stats(metrics: List[Dict[str, Any]]):
     avg_pressure = float(np.mean([m["pool_pressure"] for m in metrics]))
     max_pressure = float(np.max([m["pool_pressure"] for m in metrics]))
     avg_offload = float(np.mean([m["offload_ratio"] for m in metrics]))
-    
+
     fog_total = int(sum(m["tasks_placed_fog"] for m in metrics))
     cloud_total = int(sum(m["tasks_placed_cloud"] for m in metrics))
     lstm_fb = float(np.mean([m.get("lstm_fallback_used", 1) for m in metrics]))
     dqn_fb_tasks = int(sum(m.get("dqn_fallback_used_tasks", 0) for m in metrics))
 
-    # ✅ Scale UP/DOWN totals (pris du dernier tick si dispo)
-    last = metrics[-1] if metrics else {}
-    scale_up = int(last.get("scale_up_total", 0))
-    scale_down = int(last.get("scale_down_total", 0))
     rows = [
         ["Avg pool pressure", f"{avg_pressure:.2f}"],
         ["Max pool pressure", f"{max_pressure:.2f}"],
@@ -163,9 +147,6 @@ def print_final_stats(metrics: List[Dict[str, Any]]):
         ["Total tasks on Cloud", str(cloud_total)],
         ["LSTM fallback (ticks)", f"{lstm_fb:.1%}"],
         ["DQN fallback (tasks)", str(dqn_fb_tasks)],
-        # ✅ Ajout demandé
-        ["Total scale UP", str(scale_up)],
-        ["Total scale DOWN", str(scale_down)]
     ]
     print_table(["Metric", "Value"], rows, title="📊 STATISTIQUES FINALES")
 
@@ -180,5 +161,3 @@ def save_metrics_csv(metrics: List[Dict[str, Any]], output_path: str):
         w.writeheader()
         w.writerows(metrics)
     print(c(f"\n💾 CSV sauvegardé: {output_path}", "green", bold=True))
-# project/ui_utils.py  (patch MINIMAL: print_tick accepte fog_nodes/cloud_nodes)
-# ⚠️ Garde le reste de ton fichier tel quel, tu ajoutes/modifies seulement print_tick.

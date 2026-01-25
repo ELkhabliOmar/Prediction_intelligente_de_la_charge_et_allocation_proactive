@@ -18,6 +18,14 @@ def plot_simulation_results(csv_path: str, output_path: str):
 
     df = pd.read_csv(csv_path)
     
+    # ✅ CORRECTION: Renommage des colonnes pour correspondre à sim_core.py
+    rename_map = {
+        "pool_pressure": "pressure",
+        "pool_active_cpu_fog": "active_cpu_fog",
+        "pool_fog_capacity": "fog_capacity"
+    }
+    df.rename(columns=rename_map, inplace=True)
+    
     # Calcul des métriques de performance
     metrics = calculate_performance_metrics(df)
     

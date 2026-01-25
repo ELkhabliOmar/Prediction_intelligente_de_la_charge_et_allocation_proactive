@@ -174,7 +174,7 @@ def run_simulation():
     if str(out_dir) and not out_dir.exists():
         out_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = f'python {SIM_SCRIPT} --ticks {ticks} --W {W} --target_util {target} --output_csv "{out_csv}" --workload "{DEFAULT_TESTSET}"'
+    cmd = f'python {SIM_SCRIPT} --ticks {ticks} --W {W} --target_util {target} --output_csv "{out_csv}" --workload "{DEFAULT_TRAINSET}"'
     run_cmd(cmd, "🌫️☁️  SIMULATION FOG-CLOUD")
 
 def run_plot():
@@ -197,7 +197,7 @@ def full_pipeline():
 
     run_cmd(f'python {TRAIN_LSTM_SCRIPT} --data "{DEFAULT_TRAINSET}"', "🧠 Étape 1/4 : Entraînement LSTM")
     run_cmd(f'python "{TRAIN_DQN_SCRIPT}" --data "{DEFAULT_TRAINSET}"', "🎯 Étape 2/4 : Entraînement DQN")
-    run_cmd(f'python "{SIM_SCRIPT}" --ticks 200 --W 10 --target_util 0.70 --output_csv "{DEFAULT_RESULTS}" --workload "{DEFAULT_TESTSET}"',
+    run_cmd(f'python "{SIM_SCRIPT}" --ticks 200 --W 10 --target_util 0.70 --output_csv "{DEFAULT_RESULTS}" --workload "{DEFAULT_TRAINSET}"',
             "🌫️☁️  Étape 3/4 : Simulation")
     run_cmd(f'python "{PLOT_SCRIPT}" --input "{DEFAULT_RESULTS}" --output "{DEFAULT_PLOT_OUT}"',
             "📈 Étape 4/4 : Graphique")

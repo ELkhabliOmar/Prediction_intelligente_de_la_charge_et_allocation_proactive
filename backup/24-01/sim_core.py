@@ -1,4 +1,4 @@
-# project/sim_core.py (corrigé: logs clairs + downscale stable + prédiction/plan AVANT metrics)
+# project/sim_core.py (logique + état global + algorithme)
 import csv
 import math
 import random
@@ -173,14 +173,8 @@ class Module1_LSTMPredictor:
         if (not self.model_loaded) or (self.model is None):
             pred = max(0.0, last_p * 0.7) if (last_p < 0.2 and mean_last_5 < 0.3) else last_p
             unc = max(0.05, 0.08 + 0.08 * min(pred, 2.0))
-            return {
-                h: {
-                    "prediction": float(pred),
-                    "uncertainty": float(min(unc + 0.01 * h, 0.5)),
-                    "used_fallback": True,
-                }
-                for h in self.horizons
-            }
+            return {h: {"prediction": float(pred), "uncertainty": float(min(unc + 0.01 * h, 0.5)), "used_fallback": True}
+                    for h in self.horizons}
 
         seq_len = self.seq_len
         hist = hist_all[-seq_len:]
@@ -215,13 +209,7 @@ class Module1_LSTMPredictor:
             preds[h] = {"prediction": float(pred_p), "uncertainty": float(unc), "used_fallback": False}
         return preds
 
-
 class Module2_ProactivePlanner:
-    """
-    ✅ Fix Down-scaling:
-    - le scale DOWN n'est plus déclenché instantanément.
-    - il faut une pression basse pendant N fenêtres (LOW_P_N).
-    """
     def __init__(self, target_util=0.70, min_fog_cpu=30, ema_alpha=0.25, cooldown_windows=2, max_scale_mult=4.0):
         self.target_util = float(target_util)
         self.min_fog_cpu = int(min_fog_cpu)
@@ -231,23 +219,20 @@ class Module2_ProactivePlanner:
         self.last_scale_t = -10**9
         self.ema_predicted_active_cpu: Optional[float] = None
 
-        # ✅ stabilité downscale
-        self.low_pressure_windows = 0
-
     def plan(self, predictions, total_fog_capacity, total_incoming_demand, current_pressure, current_t, W_window, worst_pressure=0.0):
         pred_h5 = predictions.get(5, {"prediction": current_pressure, "uncertainty": 0.10})
         pred_p = float(pred_h5.get("prediction", current_pressure))
         unc = float(pred_h5.get("uncertainty", 0.10))
-
+        # Moins pessimiste : on ne prend que 50% de l'incertitude pour le dimensionnement
         robust_p = min(max(pred_p + (unc * 0.5), 0.0), 3.0)
 
         current_cap = float(max(1.0, total_fog_capacity))
-        # Correction: robust_p inclut déjà l'historique (donc la demande récente). On n'ajoute pas total_incoming_demand en double.
-        predicted_active_cpu = (robust_p * current_cap)
+        predicted_active_cpu = (robust_p * current_cap) + float(total_incoming_demand)
 
+        # EMA Dynamique : si la charge baisse, on oublie le passé plus vite (Fast Decay)
         alpha = self.ema_alpha
         if self.ema_predicted_active_cpu is not None and predicted_active_cpu < self.ema_predicted_active_cpu:
-            alpha = 0.60  # decay rapide après un pic
+            alpha = 0.60  # Decay rapide pour éviter le sur-provisionnement après un pic
 
         if self.ema_predicted_active_cpu is None:
             self.ema_predicted_active_cpu = predicted_active_cpu
@@ -260,39 +245,29 @@ class Module2_ProactivePlanner:
         cooldown_ticks = max(1, W_window) * self.cooldown_windows
         in_cooldown = (current_t - self.last_scale_t) < cooldown_ticks
 
-        # ✅ stabilité downscale (fenêtres)
-        LOW_P_TH = 0.50  # Augmenté (était 0.25) pour permettre le downscale à charge moyenne
-        LOW_P_N = 2      # Réduit (était 3) pour réagir plus vite
-        if current_pressure < LOW_P_TH:
-            self.low_pressure_windows += 1
-        else:
-            self.low_pressure_windows = 0
-
         decision = "none"
         reason = "within band"
-       # up_th, down_th = 1.20, 0.80  # Seuil down augmenté (0.70 -> 0.80) pour faciliter le scale down
-        up_th, down_th = 1.15, 0.85
+        up_th, down_th = 1.20, 0.70
 
         if not in_cooldown:
             if required_cpu > current_cap * up_th:
-                decision = "up"
-                reason = f"required_cpu({required_cpu:.1f}) > {up_th}*cap({current_cap:.1f})"
+                decision = "up"; reason = f"required_cpu({required_cpu:.1f}) > {up_th}*cap({current_cap:.1f})"
             elif required_cpu < current_cap * down_th:
-                # Downscale si pression stablement basse OU demande très faible (<30%) immédiate
-                if self.low_pressure_windows >= LOW_P_N or required_cpu < current_cap * 0.30:
-                    decision = "down"
-                    reason = f"low demand (win={self.low_pressure_windows}) | required_cpu({required_cpu:.1f}) < {down_th}*cap"
+                decision = "down"; reason = f"required_cpu({required_cpu:.1f}) < {down_th}*cap({current_cap:.1f})"
+            elif current_pressure < 0.15:
+                decision = "down"; reason = f"very low pressure({current_pressure:.2f})"
 
-        # --- Garde-fous ---
+        # --- Garde-fous (Safety Gates) ---
+        # 1. Pas de scale UP si le système est globalement vide (évite les hallucinations)
         if decision == "up" and current_pressure < 0.30:
             decision = "none"
             reason = f"cancelled (low global pressure {current_pressure:.2f})"
 
+        # 2. Emergency Scale : si un noeud est saturé, on scale UP même si globalement OK
         if worst_pressure > 0.95 and decision != "up" and not in_cooldown:
             decision = "up"
             reason = f"emergency scale (worst_fog={worst_pressure:.2f})"
 
-        # --- Offload ---
         offload_ratio = 0.0
         offload_reason = "no offload"
         demand_vs_capacity = ema_cpu / max(current_cap, 1.0)
@@ -308,6 +283,7 @@ class Module2_ProactivePlanner:
             offload_ratio = max(offload_ratio, safety_offload)
             offload_reason += f" | SAFETY pressure={current_pressure:.2f}"
 
+        # 3. Pas d'offload si pression faible
         if current_pressure < 0.40:
             offload_ratio = 0.0
             offload_reason = "low pressure"
@@ -328,7 +304,6 @@ class Module2_ProactivePlanner:
             "offload_ratio": float(offload_ratio),
             "offload_reason": offload_reason,
         }
-
 
 class Module3_Scheduler:
     def __init__(self, dqn_path: str = None, cpu_threshold_cloud=300, warmup_ticks=15):
@@ -358,6 +333,7 @@ class Module3_Scheduler:
             print("[Module3] ℹ️ DQN absent -> baseline")
 
     def baseline(self, task_cpu: int, offload_ratio: float, pressure: float) -> str:
+        # Safety: ignore offload request if pressure is low
         if pressure < 0.40:
             offload_ratio = 0.0
         if random.random() < offload_ratio:
@@ -369,6 +345,7 @@ class Module3_Scheduler:
         return "Fog"
 
     def decide(self, task_cpu: int, task_ram: int, pressure: float, fog_cpu: int, offload_ratio: float, t: int):
+        # Safety: ignore offload request if pressure is low
         if pressure < 0.40:
             offload_ratio = 0.0
         if t <= self.warmup_ticks or (not self.use_dqn) or (self.dqn is None) or (self.dqn_fallback_count >= self.max_fallback):
@@ -486,18 +463,14 @@ MODULE3: Optional[Module3_Scheduler] = None
 
 W_WINDOW = 10
 CLOUD_RR = 0
-TOTAL_SCALE_UP = 0
-TOTAL_SCALE_DOWN = 0
 
 def setup_state(workload_idx, module1, module2, module3, W: int, **kwargs):
-    global WORKLOAD_IDX, MODULE1, MODULE2, MODULE3, W_WINDOW, TOTAL_SCALE_UP, TOTAL_SCALE_DOWN
+    global WORKLOAD_IDX, MODULE1, MODULE2, MODULE3, W_WINDOW
     WORKLOAD_IDX = workload_idx
     MODULE1 = module1
     MODULE2 = module2
     MODULE3 = module3
     W_WINDOW = int(W)
-    TOTAL_SCALE_UP = 0
-    TOTAL_SCALE_DOWN = 0
 
 def get_metrics():
     return SIMULATION_METRICS
@@ -506,7 +479,7 @@ def get_metrics():
 # Main algorithm
 # =========================================================
 def proactive_placement_algorithm(parameters):
-    global CURRENT_T, ACTIVE_SERVICES, PRESSURE_HISTORY, PREDICTIONS, PLAN, SIMULATION_METRICS, CLOUD_RR, TOTAL_SCALE_UP, TOTAL_SCALE_DOWN
+    global CURRENT_T, ACTIVE_SERVICES, PRESSURE_HISTORY, PREDICTIONS, PLAN, SIMULATION_METRICS, CLOUD_RR
 
     simulator = parameters["simulator"]
 
@@ -535,10 +508,6 @@ def proactive_placement_algorithm(parameters):
     tasks_placed_fog_this_tick = 0
     tasks_placed_cloud_this_tick = 0
     dqn_fallback_used_tick = 0
-
-    # ✅ Fix confusion: on compte aussi les nœuds distincts utilisés ce tick
-    fog_nodes_used_this_tick = set()
-    cloud_nodes_used_this_tick = set()
 
     for task in tasks_now:
         app = Application()
@@ -574,14 +543,12 @@ def proactive_placement_algorithm(parameters):
 
         if decision == "Fog":
             service.placed_on_server = fog_choice
-            fog_nodes_used_this_tick.add(getattr(fog_choice, "name", "Fog"))
             tasks_placed_fog_this_tick += 1
             service.provision(fog_choice)
         else:
             cloud_node = clouds[CLOUD_RR % len(clouds)]
             CLOUD_RR += 1
             service.placed_on_server = cloud_node
-            cloud_nodes_used_this_tick.add(getattr(cloud_node, "name", "Cloud"))
             tasks_placed_cloud_this_tick += 1
             service.provision(cloud_node)
 
@@ -596,12 +563,43 @@ def proactive_placement_algorithm(parameters):
     fog_pressures = [pressure_server(ACTIVE_SERVICES, f) for f in fogs]
     worst_fog_p = max(fog_pressures) if fog_pressures else 0.0
 
-    # ✅ 4) MAPE/Plan toutes W ticks (AVANT metrics pour cohérence CSV)
+    print_tick(
+        t=CURRENT_T,
+        active_cpu=int(total_active_cpu_fog),
+        cap=int(total_fog_capacity),
+        pressure=float(pressure_global_real),
+        worst=float(worst_fog_p),
+        fog_n=int(tasks_placed_fog_this_tick),
+        cloud_n=int(tasks_placed_cloud_this_tick),
+    )
+
+    pred_h5 = PREDICTIONS.get(5, {})
+    SIMULATION_METRICS.append({
+        "t": int(CURRENT_T),
+        "pool_active_cpu_fog": int(total_active_cpu_fog),
+        "pool_fog_capacity": int(total_fog_capacity),
+        "pool_pressure": float(pressure_global_real),
+        "worst_fog_pressure": float(worst_fog_p),
+        "predicted_pressure": float(pred_h5.get("prediction", pressure_global_real)),
+        "prediction_uncertainty": float(pred_h5.get("uncertainty", 0.10)),
+        "lstm_fallback_used": int(pred_h5.get("used_fallback", True)) if pred_h5 else 1,
+        "dqn_fallback_used_tasks": int(dqn_fallback_used_tick),
+        "scale_decision": str(PLAN.get("scale_decision", "none")),
+        "offload_ratio": float(PLAN.get("offload_ratio", 0.0)),
+        "offload_reason": str(PLAN.get("offload_reason", "")),
+        "tasks_on_fog": int(sum(1 for s in ACTIVE_SERVICES if getattr(s, "placed_on", None) == "Fog")),
+        "tasks_on_cloud": int(sum(1 for s in ACTIVE_SERVICES if getattr(s, "placed_on", None) == "Cloud")),
+        "tasks_placed_fog": int(tasks_placed_fog_this_tick),
+        "tasks_placed_cloud": int(tasks_placed_cloud_this_tick),
+    })
+
+    # 4) MAPE toutes W ticks
     if CURRENT_T > 0 and (CURRENT_T % W_WINDOW == 0):
         PREDICTIONS = MODULE1.predict(PRESSURE_HISTORY)
         current_p_clip = PRESSURE_HISTORY[-1] if PRESSURE_HISTORY else 0.0
 
-        worst_p_now = max([pressure_server(ACTIVE_SERVICES, f) for f in fogs], default=0.0)
+        fog_pressures = [pressure_server(ACTIVE_SERVICES, f) for f in fogs]
+        worst_p_now = max(fog_pressures) if fog_pressures else 0.0
 
         PLAN = MODULE2.plan(
             predictions=PREDICTIONS,
@@ -620,55 +618,15 @@ def proactive_placement_algorithm(parameters):
                 step = max(20, int(target_fog.cpu * 0.25))
                 max_cap = int(getattr(target_fog, "base_cpu", target_fog.cpu) * MODULE2.max_scale_mult)
                 target_fog.cpu = int(min(max_cap, target_fog.cpu + step))
-                TOTAL_SCALE_UP += 1
                 print(f"[scale] UP on {target_fog.name} (p={p:.2f})")
             else:
                 target_fog, p = pick_least_loaded_fog(fogs, ACTIVE_SERVICES)
                 step = max(20, int(target_fog.cpu * 0.20))
                 min_cap = max(int(MODULE2.min_fog_cpu), int(getattr(target_fog, "base_cpu", target_fog.cpu) * 0.4))
                 target_fog.cpu = int(max(min_cap, target_fog.cpu - step))
-                TOTAL_SCALE_DOWN += 1
                 print(f"[scale] DOWN on {target_fog.name} (p={p:.2f})")
 
         # Affichage tableau MAPE
         print_mape_block(CURRENT_T, PREDICTIONS, PLAN)
-
-    # ✅ Affichage tick (maintenant avec nodes_used)
-    print_tick(
-        t=CURRENT_T,
-        active_cpu=int(total_active_cpu_fog),
-        cap=int(total_fog_capacity),
-        pressure=float(pressure_global_real),
-        worst=float(worst_fog_p),
-        fog_n=int(tasks_placed_fog_this_tick),
-        cloud_n=int(tasks_placed_cloud_this_tick),
-        fog_nodes=int(len(fog_nodes_used_this_tick)),
-        cloud_nodes=int(len(cloud_nodes_used_this_tick)),
-    )
-
-    # ✅ Metrics (cohérents: PREDICTIONS/PLAN déjà mis à jour)
-    pred_h5 = PREDICTIONS.get(5, {})
-    SIMULATION_METRICS.append({
-        "t": int(CURRENT_T),
-        "active_cpu_fog": int(total_active_cpu_fog),
-        "fog_capacity": int(total_fog_capacity),
-        "pressure": float(pressure_global_real),
-        "worst_fog_pressure": float(worst_fog_p),
-        "predicted_pressure": float(pred_h5.get("prediction", pressure_global_real)),
-        "prediction_uncertainty": float(pred_h5.get("uncertainty", 0.10)),
-        "lstm_fallback_used": int(pred_h5.get("used_fallback", True)) if pred_h5 else 1,
-        "dqn_fallback_used_tasks": int(dqn_fallback_used_tick),
-        "scale_decision": str(PLAN.get("scale_decision", "none")),
-        "offload_ratio": float(PLAN.get("offload_ratio", 0.0)),
-        "offload_reason": str(PLAN.get("offload_reason", "")),
-        "tasks_on_fog": int(sum(1 for s in ACTIVE_SERVICES if getattr(s, "placed_on", None) == "Fog")),
-        "tasks_on_cloud": int(sum(1 for s in ACTIVE_SERVICES if getattr(s, "placed_on", None) == "Cloud")),
-        "tasks_placed_fog": int(tasks_placed_fog_this_tick),
-        "tasks_placed_cloud": int(tasks_placed_cloud_this_tick),
-        "fog_nodes_used_tick": int(len(fog_nodes_used_this_tick)),
-        "cloud_nodes_used_tick": int(len(cloud_nodes_used_this_tick)),
-        "scale_up_total": int(TOTAL_SCALE_UP),
-        "scale_down_total": int(TOTAL_SCALE_DOWN),
-    })
 
     CURRENT_T += 1
