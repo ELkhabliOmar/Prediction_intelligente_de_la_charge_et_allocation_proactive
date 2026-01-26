@@ -216,13 +216,17 @@ class Module1_LSTMPredictor:
         return preds
 
 
-class Module2_ProactivePlanner:
+class Module2_HVWPO_Planner:
     """
-    ✅ Fix Down-scaling:
-    - le scale DOWN n'est plus déclenché instantanément.
-    - il faut une pression basse pendant N fenêtres (LOW_P_N).
+    Module 2: H-VWPO (Horizontal-Vertical Workload Prediction & Offloading).
+    TYPE: Algorithme Heuristique (Règles fixes) - Pas d'entraînement nécessaire.
+
+    Implémente la stratégie proactive :
+    1. Vertical : Scaling des ressources Fog (Scale UP/DOWN) basé sur la prédiction LSTM.
+    2. Horizontal : Calcul du ratio de délestage (Offloading) vers le Cloud.
     """
     def __init__(self, target_util=0.70, min_fog_cpu=30, ema_alpha=0.25, cooldown_windows=2, max_scale_mult=4.0):
+        print(f"[Module2] ✅ H-VWPO Planner initialisé (Target={target_util}, ScaleMult={max_scale_mult})")
         self.target_util = float(target_util)
         self.min_fog_cpu = int(min_fog_cpu)
         self.ema_alpha = float(ema_alpha)
@@ -247,7 +251,7 @@ class Module2_ProactivePlanner:
 
         alpha = self.ema_alpha
         if self.ema_predicted_active_cpu is not None and predicted_active_cpu < self.ema_predicted_active_cpu:
-            alpha = 0.60  # decay rapide après un pic
+            alpha = 0.80  # decay TRES rapide après un pic pour favoriser le downscale
 
         if self.ema_predicted_active_cpu is None:
             self.ema_predicted_active_cpu = predicted_active_cpu
@@ -261,8 +265,8 @@ class Module2_ProactivePlanner:
         in_cooldown = (current_t - self.last_scale_t) < cooldown_ticks
 
         # ✅ stabilité downscale (fenêtres)
-        LOW_P_TH = 0.50  # Augmenté (était 0.25) pour permettre le downscale à charge moyenne
-        LOW_P_N = 2      # Réduit (était 3) pour réagir plus vite
+        LOW_P_TH = 0.75  # Augmenté à 0.75 : si on est sous la cible + marge, on compte comme "basse pression"
+        LOW_P_N = 1      # Réduit au minimum (était 2) : réaction immédiate
         if current_pressure < LOW_P_TH:
             self.low_pressure_windows += 1
         else:
@@ -270,8 +274,8 @@ class Module2_ProactivePlanner:
 
         decision = "none"
         reason = "within band"
-       # up_th, down_th = 1.20, 0.80  # Seuil down augmenté (0.70 -> 0.80) pour faciliter le scale down
-        up_th, down_th = 1.15, 0.85
+        
+        up_th, down_th = 1.15, 0.95  # Seuil down très agressif (0.95) : si on a 5% de trop, on réduit
 
         if not in_cooldown:
             if required_cpu > current_cap * up_th:
@@ -282,6 +286,9 @@ class Module2_ProactivePlanner:
                 if self.low_pressure_windows >= LOW_P_N or required_cpu < current_cap * 0.30:
                     decision = "down"
                     reason = f"low demand (win={self.low_pressure_windows}) | required_cpu({required_cpu:.1f}) < {down_th}*cap"
+                else:
+                    # Debug: dire pourquoi on ne downscale pas encore
+                    reason = f"waiting stability (win={self.low_pressure_windows}/{LOW_P_N}) | required < cap"
 
         # --- Garde-fous ---
         if decision == "up" and current_pressure < 0.30:
@@ -297,14 +304,17 @@ class Module2_ProactivePlanner:
         offload_reason = "no offload"
         demand_vs_capacity = ema_cpu / max(current_cap, 1.0)
 
-        if demand_vs_capacity > 1.0:
-            excess_ratio = min(1.0, (demand_vs_capacity - 1.0) * 0.4)
-            offload_ratio = min(0.60, excess_ratio)
+        if demand_vs_capacity > 0.95:
+            # ✅ CORRECTION: Délestage proactif dès 95% de la demande estimée
+            excess_ratio = min(1.0, (demand_vs_capacity - 0.95) * 2.0)
+            offload_ratio = min(0.90, excess_ratio)
             offload_reason = f"demand/capacity={demand_vs_capacity:.2f}"
 
-        if current_pressure > 1.0:
-            safety_offload = 0.20 + 0.10 * (current_pressure - 1.0)
-            safety_offload = min(0.60, safety_offload)
+        if current_pressure > 0.90:
+            # ✅ CORRECTION: Sécurité agressive. Si p=1.0 -> 50% offload. Si p=1.1 -> 100% offload.
+            safety_offload = (current_pressure - 0.90) * 5.0
+            safety_offload = min(1.0, max(0.0, safety_offload))
+            
             offload_ratio = max(offload_ratio, safety_offload)
             offload_reason += f" | SAFETY pressure={current_pressure:.2f}"
 
@@ -369,6 +379,11 @@ class Module3_Scheduler:
         return "Fog"
 
     def decide(self, task_cpu: int, task_ram: int, pressure: float, fog_cpu: int, offload_ratio: float, t: int):
+        # ✅ SAFETY OVERRIDE: Si le Fog est saturé (>95%), on force le Cloud immédiatement
+        # Cela protège le système même si le DQN ou le Planner sont en retard.
+        if pressure >= 0.95:
+            return "Cloud", False
+
         if pressure < 0.40:
             offload_ratio = 0.0
         if t <= self.warmup_ticks or (not self.use_dqn) or (self.dqn is None) or (self.dqn_fallback_count >= self.max_fallback):
@@ -417,6 +432,9 @@ def _normalize_task_row(row: Dict[str, Any]) -> Dict[str, Any]:
             "duration": int(float(row["duration"])),
         }
 
+    # --- Conversion du format Tuple30K (Raw) vers Simulation (Normalized) ---
+    # Colonnes CSV: TaskName, GenerationTime, TaskID, TaskSize, CyclesPerBit, TransBitRate, ...
+    # Formules de conversion :
     task_size = float(row.get("TaskSize", 0.0))
     cycles_per_bit = float(row.get("CyclesPerBit", 0.0))
     trans_rate = max(1.0, float(row.get("TransBitRate", 1.0)))
@@ -481,16 +499,17 @@ PREDICTIONS: Dict[int, Dict[str, float]] = {}
 PLAN: Dict[str, Any] = {"scale_decision": "none", "offload_ratio": 0.0}
 
 MODULE1: Optional[Module1_LSTMPredictor] = None
-MODULE2: Optional[Module2_ProactivePlanner] = None
+MODULE2: Optional[Module2_HVWPO_Planner] = None
 MODULE3: Optional[Module3_Scheduler] = None
 
 W_WINDOW = 10
 CLOUD_RR = 0
 TOTAL_SCALE_UP = 0
 TOTAL_SCALE_DOWN = 0
+TOTAL_ENERGY_JOULES = 0.0  # ✅ Nouveau compteur énergie
 
 def setup_state(workload_idx, module1, module2, module3, W: int, **kwargs):
-    global WORKLOAD_IDX, MODULE1, MODULE2, MODULE3, W_WINDOW, TOTAL_SCALE_UP, TOTAL_SCALE_DOWN
+    global WORKLOAD_IDX, MODULE1, MODULE2, MODULE3, W_WINDOW, TOTAL_SCALE_UP, TOTAL_SCALE_DOWN, TOTAL_ENERGY_JOULES
     WORKLOAD_IDX = workload_idx
     MODULE1 = module1
     MODULE2 = module2
@@ -498,6 +517,7 @@ def setup_state(workload_idx, module1, module2, module3, W: int, **kwargs):
     W_WINDOW = int(W)
     TOTAL_SCALE_UP = 0
     TOTAL_SCALE_DOWN = 0
+    TOTAL_ENERGY_JOULES = 0.0
 
 def get_metrics():
     return SIMULATION_METRICS
@@ -506,7 +526,7 @@ def get_metrics():
 # Main algorithm
 # =========================================================
 def proactive_placement_algorithm(parameters):
-    global CURRENT_T, ACTIVE_SERVICES, PRESSURE_HISTORY, PREDICTIONS, PLAN, SIMULATION_METRICS, CLOUD_RR, TOTAL_SCALE_UP, TOTAL_SCALE_DOWN
+    global CURRENT_T, ACTIVE_SERVICES, PRESSURE_HISTORY, PREDICTIONS, PLAN, SIMULATION_METRICS, CLOUD_RR, TOTAL_SCALE_UP, TOTAL_SCALE_DOWN, TOTAL_ENERGY_JOULES
 
     simulator = parameters["simulator"]
 
@@ -596,6 +616,18 @@ def proactive_placement_algorithm(parameters):
     fog_pressures = [pressure_server(ACTIVE_SERVICES, f) for f in fogs]
     worst_fog_p = max(fog_pressures) if fog_pressures else 0.0
 
+    # ✅ AMÉLIORATION: Calcul Énergie (Modèle Linéaire)
+    # Hypothèse: Serveur Fog = 100W idle, 250W max
+    P_IDLE = 100.0
+    P_MAX = 250.0
+    energy_tick = 0.0
+    for f in fogs:
+        util = pressure_server(ACTIVE_SERVICES, f)
+        # Power = Idle + (Max - Idle) * Utilization
+        power = P_IDLE + (P_MAX - P_IDLE) * min(1.0, util)
+        energy_tick += power  # Watts * 1 sec = Joules
+    TOTAL_ENERGY_JOULES += energy_tick
+
     # ✅ 4) MAPE/Plan toutes W ticks (AVANT metrics pour cohérence CSV)
     if CURRENT_T > 0 and (CURRENT_T % W_WINDOW == 0):
         PREDICTIONS = MODULE1.predict(PRESSURE_HISTORY)
@@ -669,6 +701,7 @@ def proactive_placement_algorithm(parameters):
         "cloud_nodes_used_tick": int(len(cloud_nodes_used_this_tick)),
         "scale_up_total": int(TOTAL_SCALE_UP),
         "scale_down_total": int(TOTAL_SCALE_DOWN),
+        "energy_joules_cumul": float(TOTAL_ENERGY_JOULES), # ✅ Métrique sauvegardée
     })
 
     CURRENT_T += 1

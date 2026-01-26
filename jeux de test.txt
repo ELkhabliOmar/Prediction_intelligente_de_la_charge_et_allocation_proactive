@@ -2,3 +2,23 @@ pression pool (p = poolCPU / fog_capacity)
 robust_pred = pred + unc 
 puis required_cpu = ema_cpu / target_util
 seq_len=30 = le modèle regarde les 30 dernières valeurs (pression/charge) pour prédire la prochaine.
+
+************************************************************************************************
+2. Gestion automatique de l'état et du temps
+Si tu devais écrire ton propre simulateur "from scratch" (comme dans les stubs), tu devrais gérer toi-même :
+
+L'avancement du temps (ticks).
+La libération des ressources (CPU/RAM) quand une tâche se termine.
+La file d'attente des événements.
+Le calcul des latences réseau basées sur la topologie.
+edge-sim-py gère tout cela en arrière-plan. Dans ton script test.py, l'appel simulator.run_model() 
+déclenche un moteur événementiel complexe qui s'assure que si une tâche dure 5 secondes, 
+les ressources ne sont libérées qu'au tick T+5.
+
+
+
+En résumé
+Si tu as l'impression que c'est "juste une boucle", c'est parce que edge-sim-py abstrait la complexité.
+
+Sans edge-sim-py : Tu devrais écrire 500 lignes de code juste pour gérer la file d'attente des tâches et vérifier quelle tâche finit à quelle seconde.
+Avec edge-sim-py : Tu te concentres uniquement sur ton algorithme intelligent (Module2 et Module3) et tu laisses le simulateur gérer la "plomberie" (temps, ressources, réseau).

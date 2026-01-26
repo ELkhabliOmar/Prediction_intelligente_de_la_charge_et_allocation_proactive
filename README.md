@@ -1,69 +1,137 @@
-# Intelligent Load Prediction and Proactive Resource Allocation in Fog-Cloud Environments
+# Prédiction Intelligente de la Charge et Allocation Proactive des Ressources dans les Environnements Fog-Cloud
 
-This project implements a proactive resource allocation system for Fog-Cloud environments, specifically targeting agro-food IoT applications. It utilizes a **MAPE (Monitoring-Analysis-Planning-Execution)** loop to anticipate workload variations and optimize resource usage (latency, energy, cost) before congestion occurs.
+Ce projet met en œuvre un système d'allocation proactive de ressources pour les environnements Fog-Cloud, ciblant spécifiquement les applications IoT agroalimentaires. Il utilise une boucle **MAPE (Monitoring-Analysis-Planning-Execution)** pour anticiper les variations de charge et optimiser l'utilisation des ressources (latence, énergie, coût) avant que la congestion ne se produise.
+
+## Fonctionnalités Clés
+
+*   **Cycle MAPE Proactif** : Le cœur du simulateur est une boucle MAPE qui s'exécute périodiquement pour adapter les ressources de manière préventive.
+*   **Prédiction de Charge (LSTM)** : Un modèle `EnhancedLSTM` avec mécanisme d'attention prédit la charge future du pool de nœuds Fog.
+*   **Planification Stratégique (H-VWPO)** : Un planificateur heuristique prend des décisions de *scaling vertical* (augmenter/diminuer la capacité CPU des nœuds Fog) et de *scaling horizontal* (définir un ratio de délestage vers le Cloud).
+*   **Ordonnancement (DQN)** : Un agent d'Apprentissage par Renforcement Profond (DQN) décide pour chaque tâche si elle doit être placée sur le Fog ou le Cloud, en tenant compte du plan proactif.
+*   **Gestion d'Énergie** : La simulation suit une estimation de la consommation d'énergie en Joules des nœuds Fog.
+*   **Lanceur Interactif** : Un menu (`menu.py`) guide l'utilisateur pour entraîner les modèles, lancer des simulations et générer des graphiques.
+*   **Visualisation Détaillée** : Un script (`plot_results.py`) génère des rapports graphiques complets sur les performances de la simulation (pression, prédictions, scaling, délestage, etc.).
 
 ## Architecture
 
-The system is built on top of the `edge-sim-py` simulator and consists of three main modules:
+Le système est construit sur le simulateur `edge-sim-py` et se compose de trois modules principaux qui implémentent la boucle MAPE.
 
-### 1. Module 1: Multi-Horizon Load Prediction (Analysis)
-*   **Goal:** Predict future resource usage at different horizons (e.g., 5, 15, 30, 60 minutes).
-*   **Method:** Uses Long Short-Term Memory (LSTM) networks (currently mocked) to forecast load and calculate uncertainty margins for robust decision-making.
+### 1. Module 1: Prédiction de Charge Multi-Horizon (Analyse)
+*   **Objectif :** Prédire l'utilisation future des ressources (pression CPU) sur le pool Fog.
+*   **Méthode :** Utilise un réseau de neurones **EnhancedLSTM** (Long Short-Term Memory avec attention) chargé à partir d'un fichier pré-entraîné (`.pth`). Le modèle fournit des prédictions de charge et une estimation de l'incertitude.
 
-### 2. Module 2: Proactive Planning (Planning)
-*   **Goal:** Determine strategic resource adjustments based on predictions.
-*   **Method:** Implements the H-VWPO (Hybrid Vultures and Waterwheel Plant Optimization) logic.
-*   **Decisions:**
-    *   **Scaling:** Scale Fog node capacity Up or Down.
-    *   **Offloading:** Set a global offloading ratio to the Cloud if Fog capacity is predicted to be exceeded.
+### 2. Module 2: Planification Proactive (Planification)
+*   **Objectif :** Déterminer les ajustements stratégiques des ressources sur la base des prédictions.
+*   **Méthode :** Implémente une logique heuristique inspirée de H-VWPO.
+*   **Décisions :**
+    *   **Scaling Vertical :** Décide de `scale_up` (augmenter) ou `scale_down` (diminuer) la capacité CPU d'un nœud Fog pour s'aligner sur la charge prédite tout en visant une utilisation cible (ex: 70%).
+    *   **Délestage (Offloading) :** Calcule un ratio global de délestage vers le Cloud si la charge prédite risque de dépasser la capacité du Fog.
 
-### 3. Module 3: Proactive Scheduling (Execution)
-*   **Goal:** Fine-grained placement of individual services/tasks.
-*   **Method:**
-    *   **Fog vs. Cloud:** Uses DRLMOTS (Deep Reinforcement Learning) logic to decide placement based on the proactive plan.
-    *   **Fog Selection:** Uses FAHP/FTOPSIS (Multi-Criteria Decision Making) to select the optimal Fog node.
+### 3. Module 3: Ordonnancement Proactif (Exécution)
+*   **Objectif :** Assurer le placement fin de chaque service/tâche individuel.
+*   **Méthode :**
+    *   **Fog vs. Cloud :** Utilise un modèle **DQN** (Deep Q-Network) pour décider du placement (Fog ou Cloud) en fonction de l'état actuel du système et du ratio de délestage fourni par le planificateur.
+    *   **Sélection du Nœud Fog :** Utilise une heuristique simple pour sélectionner le nœud Fog le moins chargé (`pick_best_fog`).
 
-## Requirements
+## Structure du Projet
+
+```
+.
+├── config.py               # Fichier de configuration central (chemins, etc.)
+├── menu.py                 # Lanceur interactif pour le projet
+├── plot_results.py         # Script pour générer les graphiques d'analyse
+├── generate_workload.py    # Script pour générer les datasets de charge
+├── requirements.txt        # Dépendances Python
+├── models/
+│   ├── train_lstm.py       # Script d'entraînement du modèle LSTM
+│   └── train_dqn.py        # Script d'entraînement du modèle DQN
+├── project/
+│   ├── test.py             # Script principal de simulation (boucle MAPE)
+│   ├── sim_core.py         # Cœur de la logique de simulation et des modules
+│   └── ui_utils.py         # Utilitaires pour l'affichage console
+├── data/
+│   ├── workload.csv        # Dataset généré pour l'entraînement/simulation
+│   └── ...
+├── results/
+│   ├── results.csv         # Fichier de sortie des métriques de simulation
+│   └── plot.png            # Graphique d'analyse généré
+└── README.md
+```
+
+## Prérequis
 
 *   Python 3.8+
+*   `torch`
 *   `edge-sim-py`
 *   `numpy`
+*   `pandas`
+*   `matplotlib`
 *   `networkx`
-*   `torch`
-*   `simpy`
+*   `scipy` (optionnel, pour un meilleur lissage dans `train_lstm.py`)
 
 ## Installation
 
-1.  Install the required dependencies:
+1.  Clonez le dépôt.
+2.  Il est recommandé de créer un environnement virtuel :
+    ```bash
+    python -m venv venv
+    source venv/bin/activate  # Sur Linux/macOS
+    .\venv\Scripts\activate   # Sur Windows
+    ```
+3.  Installez les dépendances requises :
     ```bash
     python -m pip install -r requirements.txt
     ```
 
-## Project Structure
+## Utilisation (Recommandée)
 
-*   `test.py`: Main simulation script implementing the MAPE loop and the three decision modules.
-*   `data_generator.py`: Utility script to generate synthetic IoT workload datasets (`workload.csv`).
-*   `requirements.txt`: Python dependencies.
+Le moyen le plus simple d'utiliser le projet est de passer par le lanceur interactif.
 
-## Data Generation
+```bash
+python menu.py
+```
 
-The simulation requires a workload dataset (`workload.csv`) containing IoT task definitions.
+Le menu vous guidera à travers les différentes étapes :
+1.  **Entraîner le LSTM** : Crée le modèle de prédiction de charge.
+2.  **Entraîner le DQN** : Crée le modèle de décision de placement.
+3.  **Lancer la simulation** : Exécute la simulation avec les modèles entraînés.
+4.  **Générer le graphique** : Visualise les résultats de la dernière simulation.
+5.  **Pipeline complet** : Exécute les étapes 1 à 4 en séquence.
 
-*   **Automatic Generation:** The simulation script checks for `workload.csv` and generates it automatically if missing.
-*   **Manual Generation:** To regenerate the dataset with new random parameters, run:
+## Utilisation Avancée (Scripts Manuels)
+
+Vous pouvez également exécuter chaque script manuellement pour plus de contrôle.
+
+### 1. Génération des Données
+Le projet nécessite des datasets de charge. Pour les générer :
     ```bash
     python generate_workload.py
     ```
+Cela créera `data/workload.csv` (pour l'entraînement) et d'autres scénarios de test.
 
-## Usage
-
-Run the main simulation script:
-
+### 2. Entraînement des Modèles
+Entraînez d'abord le LSTM, puis le DQN.
 ```bash
-python test.py
+# Entraîner le prédicteur de charge
+python models/train_lstm.py --epochs 200 --lr 0.001
+
+# Entraîner l'agent de décision
+python models/train_dqn.py --steps 20000
+```
+Les modèles seront sauvegardés dans le dossier `models/` (configurable dans `config.py`).
+
+### 3. Lancer la Simulation
+Exécutez la simulation en spécifiant le workload et les modèles.
+```bash
+python project/test.py --ticks 200 --W 10 --workload data/workload.csv
+```
+Les résultats seront sauvegardés dans `results/results.csv`.
+
+### 4. Visualiser les Résultats
+Générez le graphique d'analyse à partir du fichier de résultats.
+```bash
+python plot_results.py --input results/results.csv --output results/plot.png
 ```
 
-The simulation will initialize the Fog-Cloud topology and the application workflow. It will then execute the proactive MAPE cycle periodically, printing decisions (Scaling, Offloading, Placement) to the console.
-
 ---
-Based on the research project by Omar EL-KHABLI.
+Basé sur le projet de recherche de Omar EL-KHABLI.

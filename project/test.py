@@ -6,6 +6,7 @@ import os
 import random
 import sys
 from pathlib import Path
+import networkx as nx
 
 import numpy as np
 import torch
@@ -23,7 +24,7 @@ from project.sim_core import (
     get_metrics,
     load_workload_indexed,
     Module1_LSTMPredictor,
-    Module2_ProactivePlanner,
+    Module2_HVWPO_Planner,
     Module3_Scheduler,
 )
 
@@ -128,8 +129,7 @@ def main():
     module1 = Module1_LSTMPredictor(model_path=args.lstm_model, device="cpu")
 
     # ⚠️ Le downscaling se corrige dans Module2_ProactivePlanner (sim_core.py)
-    module2 = Module2_ProactivePlanner(
-        target_util=args.target_util,
+    module2 = Module2_HVWPO_Planner(
         min_fog_cpu=args.min_fog_cpu,
         ema_alpha=0.25,
         cooldown_windows=2,
@@ -182,6 +182,23 @@ def main():
         cloud = EdgeServer(cpu=cpu, memory=200000, disk=200000)
         cloud.name = name
         cloud.coordinates = coord
+
+    # ============================
+    # 🌐 TOPOLOGIE RÉSEAU (NetworkX)
+    # ============================
+    # On définit un graphe pour gérer les latences (Fog=rapide, Cloud=lent)
+    topology = nx.Graph()
+    core_switch = "Internet-Core"
+    topology.add_node(core_switch, type="Switch")
+
+    for server in EdgeServer.all():
+        # Latence: Fog=5ms, Cloud=50ms
+        is_fog = "Fog" in server.name
+        link_latency = 5 if is_fog else 50
+        link_bw = 1000 if is_fog else 10000
+        topology.add_edge(server, core_switch, latency=link_latency, bandwidth=link_bw)
+
+    simulator.topology = topology
 
     # ✅ Stopping criterion + algo
     import project.sim_core as sim_core

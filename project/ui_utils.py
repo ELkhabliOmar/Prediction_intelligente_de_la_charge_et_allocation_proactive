@@ -142,8 +142,8 @@ def print_final_stats(metrics: List[Dict[str, Any]]):
         return
 
     import numpy as np
-    avg_pressure = float(np.mean([m["pool_pressure"] for m in metrics]))
-    max_pressure = float(np.max([m["pool_pressure"] for m in metrics]))
+    avg_pressure = float(np.mean([m["pressure"] for m in metrics]))
+    max_pressure = float(np.max([m["pressure"] for m in metrics]))
     avg_offload = float(np.mean([m["offload_ratio"] for m in metrics]))
     
     fog_total = int(sum(m["tasks_placed_fog"] for m in metrics))
@@ -155,6 +155,8 @@ def print_final_stats(metrics: List[Dict[str, Any]]):
     last = metrics[-1] if metrics else {}
     scale_up = int(last.get("scale_up_total", 0))
     scale_down = int(last.get("scale_down_total", 0))
+    total_energy_kj = float(last.get("energy_joules_cumul", 0.0)) / 1000.0
+
     rows = [
         ["Avg pool pressure", f"{avg_pressure:.2f}"],
         ["Max pool pressure", f"{max_pressure:.2f}"],
@@ -165,7 +167,8 @@ def print_final_stats(metrics: List[Dict[str, Any]]):
         ["DQN fallback (tasks)", str(dqn_fb_tasks)],
         # ✅ Ajout demandé
         ["Total scale UP", str(scale_up)],
-        ["Total scale DOWN", str(scale_down)]
+        ["Total scale DOWN", str(scale_down)],
+        ["Total Energy (kJ)", f"{total_energy_kj:.2f}"] # ✅ Affichage Énergie
     ]
     print_table(["Metric", "Value"], rows, title="📊 STATISTIQUES FINALES")
 

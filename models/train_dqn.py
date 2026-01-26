@@ -165,8 +165,14 @@ def main():
 
     print("\n🎯 Début de l'entraînement...")
 
+    # ✅ AMÉLIORATION: Parcours séquentiel pour préserver les "bursts" de charge
+    task_idx = 0
+    num_tasks = len(tasks)
+
     for step in range(args.steps):
-        task = random.choice(tasks)
+        task = tasks[task_idx]
+        task_idx = (task_idx + 1) % num_tasks
+        
         cpu = float(task["cpu_demand"])
         ram = float(task["ram_demand"])
         dur = max(1.0, float(task.get("duration", 1)))
