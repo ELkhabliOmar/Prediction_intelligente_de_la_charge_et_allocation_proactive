@@ -208,6 +208,45 @@ class TestModules(BaseTest):
         self.assertIn("prediction", preds_model[5])
         self.assertFalse(preds_model[5]["used_fallback"])
 
+    def test_module1_prediction_logic(self):
+        """Teste la logique de prédiction du LSTM dans des scénarios spécifiques."""
+        from unittest.mock import MagicMock
+
+        predictor = Module1_LSTMPredictor(model_path=self.lstm_path)
+        self.assertTrue(predictor.model_loaded, "Le modèle LSTM factice doit être chargé pour ce test.")
+
+        # --- MOCK pour rendre le test déterministe ---
+        # Le modèle LSTM est initialisé aléatoirement, donc ses prédictions sont imprévisibles.
+        # On remplace l'appel au modèle par un Mock qui retourne une valeur contrôlée.
+        # Dans sim_core.py: y_norm = float(self.model(x).item())
+        predictor.model = MagicMock()
+
+        # Scénario 1: Pression basse et stable
+        # On simule une sortie modèle basse (ex: 0.1). Avec max_util=1.5 -> pred ~ 0.15
+        predictor.model.return_value.item.return_value = 0.1
+        
+        history_low = deque([0.15] * 50, maxlen=200)
+        preds_low = predictor.predict(history_low)
+        pred_val_low = preds_low[5]["prediction"]
+        self.assertLess(pred_val_low, 0.5, "Avec une histoire basse et stable, la prédiction doit rester basse.")
+
+        # Scénario 2: Pression haute et stable
+        # On simule une sortie modèle haute (ex: 0.6). Avec max_util=1.5 -> pred ~ 0.9
+        predictor.model.return_value.item.return_value = 0.6
+
+        history_high = deque([0.9] * 50, maxlen=200)
+        preds_high = predictor.predict(history_high)
+        pred_val_high = preds_high[5]["prediction"]
+        self.assertGreater(pred_val_high, 0.7, "Avec une histoire haute et stable, la prédiction doit rester haute.")
+
+        # Scénario 3: Test de la logique de fallback (règle spécifique)
+        predictor_fallback = Module1_LSTMPredictor(model_path="invalid.pth")
+        history_fallback_low = deque([0.1] * 10, maxlen=200) # last_p=0.1, mean_last_5=0.1
+        preds_fallback_low = predictor_fallback.predict(history_fallback_low)
+        # La règle est: si last_p < 0.2 et mean_last_5 < 0.3, pred = last_p * 0.7
+        expected_pred = 0.1 * 0.7
+        self.assertAlmostEqual(preds_fallback_low[5]["prediction"], expected_pred, places=4, msg="Le fallback doit appliquer la règle de réduction pour une pression très basse.")
+
     def test_module2_planner_decisions(self):
         """Teste les décisions logiques du planificateur H-VWPO."""
         # Scénario 1: Scale UP (charge prédite > capacité * seuil)
@@ -244,22 +283,43 @@ class TestModules(BaseTest):
         scheduler_base = Module3_Scheduler(dqn_path="invalid.pth")
         self.assertFalse(scheduler_base.use_dqn)
         
-        # Test 3: Décision baseline
+        # Test 3: Décision baseline - Tâche normale
         decision_base, fallback = scheduler_base.decide(task_cpu=100, task_ram=128, pressure=0.5,
                                                         fog_cpu=200, offload_ratio=0.1, t=20)
         self.assertIn(decision_base, ["Fog", "Cloud"])
         self.assertTrue(fallback)
         
-        # Test 4: Décision avec DQN
+        # Test 4: Décision baseline - Tâche très gourmande
+        # Doit toujours aller sur le Cloud, peu importe la pression
+        decision_base_heavy, _ = scheduler_base.decide(task_cpu=scheduler_base.cpu_threshold_cloud + 1, task_ram=128,
+                                                       pressure=0.1, fog_cpu=200, offload_ratio=0.0, t=20)
+        self.assertEqual(decision_base_heavy, "Cloud", "Une tâche dépassant le seuil CPU doit aller sur le Cloud en mode baseline.")
+        
+        # Test 5: Décision avec DQN
         decision_dqn, fallback_dqn = scheduler_dqn.decide(task_cpu=100, task_ram=128, pressure=0.5,
                                                           fog_cpu=200, offload_ratio=0.1, t=20)
         self.assertIn(decision_dqn, ["Fog", "Cloud"])
         self.assertFalse(fallback_dqn)
         
-        # Test 5: Safety Override (pression > 0.95)
+        # Test 6: Safety Override (pression > 0.95)
         decision_safe, _ = scheduler_dqn.decide(task_cpu=10, task_ram=128, pressure=0.98,
                                                 fog_cpu=200, offload_ratio=0.0, t=20)
         self.assertEqual(decision_safe, "Cloud")
+
+        # Test 7: Décision DQN - Pression très basse
+        # Pour une tâche raisonnable et une pression très basse, le DQN devrait préférer le Fog.
+        # On ne peut pas garantir la décision finale, mais on peut vérifier les Q-values qui la motivent.
+        cpu_norm = 50 / 500.0
+        ram_norm = 128 / 4096.0
+        pressure_clip = 0.1
+        fog_cpu_norm = 200 / 200.0
+        offload_ratio = 0.0
+        state = torch.tensor([cpu_norm, ram_norm, pressure_clip, fog_cpu_norm, offload_ratio], dtype=torch.float32)
+        with torch.no_grad():
+            q_vals = scheduler_dqn.dqn(state.unsqueeze(0))
+            # L'action 0 est "Fog", l'action 1 est "Cloud"
+            self.assertGreater(q_vals[0][0], q_vals[0][1],
+                               "Pour une pression très basse, le DQN devrait avoir une Q-value plus élevée pour le Fog.")
 
 # --- Exécution des tests ---
 

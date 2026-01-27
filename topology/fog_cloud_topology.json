@@ -1,7 +1,11 @@
 {
   "_comment": "Topologie Fog–Cloud (sans Edge) pour simulation — Europe / France",
   "BaseLatencyType": "haversine",
+  "NetworkLatency": "calculated",
+  "PacketLoss": 0.001,
+  "CostPerGB": 0.05,
 
+  "_comment_metrics": "NetworkLatency: calculée via haversine + constantes, PacketLoss: pour simulations QoS, CostPerGB: coût monétaire transfert données",
   "_comment_fog": "5 Fog nodes (f0..f4) = régionaux, ressources moyennes (proches des sources en France)",
   "_comment_cloud": "2 Cloud nodes (c0,c1) = très puissants, distants (data centers Europe)",
   "_comment_links": "Liens Fog<->Cloud = liaisons WAN bidirectionnelles (bande passante fixe, latence via haversine)",
@@ -19,7 +23,10 @@
       "ExeEnergyCoef": 150,
       "LocX": 48.8566,
       "LocY": 2.3522,
-      "Location": "Paris, France"
+      "Location": "Paris, France",
+      "PacketLoss": 0.0005,
+      "CostPerGFLOP": 0.002,
+      "Availability": 0.9995
     },
     {
       "_comment": "Fog node régional #1 — Hauts-de-France (agro + supply chain / proche Lille)",
@@ -33,7 +40,10 @@
       "ExeEnergyCoef": 50,
       "LocX": 50.6292,
       "LocY": 3.0573,
-      "Location": "Lille, France"
+      "Location": "Lille, France",
+      "PacketLoss": 0.0008,
+      "CostPerGFLOP": 0.0015,
+      "Availability": 0.999
     },
     {
       "_comment": "Fog node régional #2 — Auvergne-Rhône-Alpes (capteurs montagne/viticulture / proche Lyon)",
@@ -47,7 +57,10 @@
       "ExeEnergyCoef": 120,
       "LocX": 45.7640,
       "LocY": 4.8357,
-      "Location": "Lyon, France"
+      "Location": "Lyon, France",
+      "PacketLoss": 0.0006,
+      "CostPerGFLOP": 0.0018,
+      "Availability": 0.9993
     },
     {
       "_comment": "Fog node régional #3 — Occitanie (agriculture + irrigation / proche Toulouse)",
@@ -61,7 +74,10 @@
       "ExeEnergyCoef": 100,
       "LocX": 43.6047,
       "LocY": 1.4442,
-      "Location": "Toulouse, France"
+      "Location": "Toulouse, France",
+      "PacketLoss": 0.0007,
+      "CostPerGFLOP": 0.0016,
+      "Availability": 0.9992
     },
     {
       "_comment": "Fog node régional #4 — Nouvelle-Aquitaine (agriculture/viticulture / proche Bordeaux)",
@@ -75,7 +91,10 @@
       "ExeEnergyCoef": 100,
       "LocX": 44.8378,
       "LocY": -0.5792,
-      "Location": "Bordeaux, France"
+      "Location": "Bordeaux, France",
+      "PacketLoss": 0.0007,
+      "CostPerGFLOP": 0.0016,
+      "Availability": 0.9992
     },
 
     {
@@ -90,7 +109,11 @@
       "ExeEnergyCoef": 1100,
       "LocX": 48.8566,
       "LocY": 2.3522,
-      "Location": "Paris Region Cloud, France"
+      "Location": "Paris Region Cloud, France",
+      "PacketLoss": 0.0001,
+      "CostPerGFLOP": 0.01,
+      "Availability": 0.9999,
+      "CarbonIntensity": 50
     },
     {
       "_comment": "Cloud node #1 — Europe (Belgique, très puissant, distant, utile pour redondance/DR)",
@@ -104,7 +127,11 @@
       "ExeEnergyCoef": 1000,
       "LocX": 50.4738,
       "LocY": 3.8038,
-      "Location": "Saint-Ghislain, Belgium"
+      "Location": "Saint-Ghislain, Belgium",
+      "PacketLoss": 0.0001,
+      "CostPerGFLOP": 0.009,
+      "Availability": 0.9999,
+      "CarbonIntensity": 40
     }
   ],
 
@@ -114,31 +141,51 @@
       "EdgeType": "Link",
       "SrcNodeID": 0,
       "DstNodeID": 5,
-      "Bandwidth": 3500
+      "Bandwidth": 3500,
+      "NetworkLatency": "calculated",
+      "BaseLatencyMs": 5,
+      "PacketLoss": 0.001,
+      "CostPerGB": 0.05
     },
     {
       "EdgeType": "Link",
       "SrcNodeID": 1,
       "DstNodeID": 6,
-      "Bandwidth": 3200
+      "Bandwidth": 3200,
+      "NetworkLatency": "calculated",
+      "BaseLatencyMs": 8,
+      "PacketLoss": 0.0012,
+      "CostPerGB": 0.06
     },
     {
       "EdgeType": "Link",
       "SrcNodeID": 2,
       "DstNodeID": 5,
-      "Bandwidth": 3300
+      "Bandwidth": 3300,
+      "NetworkLatency": "calculated",
+      "BaseLatencyMs": 15,
+      "PacketLoss": 0.0015,
+      "CostPerGB": 0.055
     },
     {
       "EdgeType": "Link",
       "SrcNodeID": 3,
       "DstNodeID": 5,
-      "Bandwidth": 3000
+      "Bandwidth": 3000,
+      "NetworkLatency": "calculated",
+      "BaseLatencyMs": 25,
+      "PacketLoss": 0.0018,
+      "CostPerGB": 0.06
     },
     {
       "EdgeType": "Link",
       "SrcNodeID": 4,
       "DstNodeID": 5,
-      "Bandwidth": 3100
+      "Bandwidth": 3100,
+      "NetworkLatency": "calculated",
+      "BaseLatencyMs": 20,
+      "PacketLoss": 0.0016,
+      "CostPerGB": 0.058
     },
 
     {
@@ -146,31 +193,51 @@
       "EdgeType": "Link",
       "SrcNodeID": 5,
       "DstNodeID": 0,
-      "Bandwidth": 3500
+      "Bandwidth": 3500,
+      "NetworkLatency": "calculated",
+      "BaseLatencyMs": 5,
+      "PacketLoss": 0.001,
+      "CostPerGB": 0.05
     },
     {
       "EdgeType": "Link",
       "SrcNodeID": 6,
       "DstNodeID": 1,
-      "Bandwidth": 3200
+      "Bandwidth": 3200,
+      "NetworkLatency": "calculated",
+      "BaseLatencyMs": 8,
+      "PacketLoss": 0.0012,
+      "CostPerGB": 0.06
     },
     {
       "EdgeType": "Link",
       "SrcNodeID": 5,
       "DstNodeID": 2,
-      "Bandwidth": 3300
+      "Bandwidth": 3300,
+      "NetworkLatency": "calculated",
+      "BaseLatencyMs": 15,
+      "PacketLoss": 0.0015,
+      "CostPerGB": 0.055
     },
     {
       "EdgeType": "Link",
       "SrcNodeID": 5,
       "DstNodeID": 3,
-      "Bandwidth": 3000
+      "Bandwidth": 3000,
+      "NetworkLatency": "calculated",
+      "BaseLatencyMs": 25,
+      "PacketLoss": 0.0018,
+      "CostPerGB": 0.06
     },
     {
       "EdgeType": "Link",
       "SrcNodeID": 5,
       "DstNodeID": 4,
-      "Bandwidth": 3100
+      "Bandwidth": 3100,
+      "NetworkLatency": "calculated",
+      "BaseLatencyMs": 20,
+      "PacketLoss": 0.0016,
+      "CostPerGB": 0.058
     },
 
     {
@@ -178,13 +245,33 @@
       "EdgeType": "Link",
       "SrcNodeID": 5,
       "DstNodeID": 6,
-      "Bandwidth": 6000
+      "Bandwidth": 6000,
+      "NetworkLatency": "calculated",
+      "BaseLatencyMs": 10,
+      "PacketLoss": 0.0005,
+      "CostPerGB": 0.02
     },
     {
       "EdgeType": "Link",
       "SrcNodeID": 6,
       "DstNodeID": 5,
-      "Bandwidth": 6000
+      "Bandwidth": 6000,
+      "NetworkLatency": "calculated",
+      "BaseLatencyMs": 10,
+      "PacketLoss": 0.0005,
+      "CostPerGB": 0.02
     }
-  ]
+  ],
+
+  "_comment_calculations": "Latence totale = BaseLatencyMs + (haversine_distance_km / 200) ms. PacketLoss: probabilité par paquet. CostPerGB: en euros.",
+  "SimulationDefaults": {
+    "TickDurationSeconds": 1,
+    "DataTransferRateGBperHour": 10,
+    "MaxSimulationTicks": 10000,
+    "QoSTargets": {
+      "MaxLatencyMs": 100,
+      "MaxPacketLoss": 0.01,
+      "MinAvailability": 0.99
+    }
+  }
 }

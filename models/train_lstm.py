@@ -63,7 +63,7 @@ def set_seed(seed: int):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-
+# Chargement : Lit des fichiers CSV de tâches (load_workload)
 def load_workload(path: str) -> List[dict]:
     rows = []
     with open(path, "r", newline="", encoding="utf-8") as f:
@@ -106,12 +106,12 @@ def _normalize_task_row(row: dict) -> dict:
         "duration": duration,
     }
 
-
+#Heuristique de placement : heuristic_place_on() place sur Cloud si CPU > seuil (300)
 def heuristic_place_on(cpu_demand: int, threshold: int = 300) -> str:
     # Heuristique simple pour construire une pression Fog "plausible" pour l'entraînement LSTM
     return "Cloud" if cpu_demand > threshold else "Fog"
 
-
+# Prétraitement des séries temporelles
 def build_pressure_series(workload: List[dict], fog_cpu: int) -> List[float]:
     if not workload:
         return []
@@ -177,7 +177,7 @@ def augment_time_series(series: List[float], augmentation_factor: float = 0.1) -
 
     return augmented.tolist()
 
-
+# Création des fenêtres temporelles
 def make_windows(
     series: List[float],
     seq_len: int,
