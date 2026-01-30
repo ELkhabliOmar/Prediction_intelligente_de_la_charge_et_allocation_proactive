@@ -1,277 +1,364 @@
 {
-  "_comment": "Topologie Fog–Cloud (sans Edge) pour simulation — Europe / France",
-  "BaseLatencyType": "haversine",
-  "NetworkLatency": "calculated",
-  "PacketLoss": 0.001,
-  "CostPerGB": 0.05,
-
-  "_comment_metrics": "NetworkLatency: calculée via haversine + constantes, PacketLoss: pour simulations QoS, CostPerGB: coût monétaire transfert données",
-  "_comment_fog": "5 Fog nodes (f0..f4) = régionaux, ressources moyennes (proches des sources en France)",
-  "_comment_cloud": "2 Cloud nodes (c0,c1) = très puissants, distants (data centers Europe)",
-  "_comment_links": "Liens Fog<->Cloud = liaisons WAN bidirectionnelles (bande passante fixe, latence via haversine)",
-
   "Nodes": [
     {
-      "_comment": "Fog node régional #0 — Île-de-France (hub proche Paris / agriculture périurbaine + logistique)",
+      "DeviceType": "Edge",
+      "Status": "active",
+      "NodeType": "Node",
+      "NodeName": "e0",
+      "NodeId": 0,
+      "MaxCpuFreq": 10000,
+      "MaxBufferSize": 4096,
+      "IdleEnergyCoef": 3.0,
+      "ExeEnergyCoef": 10.0,
+      "LocX": 33.68742,
+      "LocY": 73.0078,
+      "Location": "Islamabad, Pakistan"
+    },
+    {
       "DeviceType": "Fog",
+      "Status": "active",
       "NodeType": "Node",
       "NodeName": "f0",
-      "NodeId": 0,
+      "NodeId": 1,
       "MaxCpuFreq": 110000,
       "MaxBufferSize": 16384,
       "IdleEnergyCoef": 30,
       "ExeEnergyCoef": 150,
-      "LocX": 48.8566,
-      "LocY": 2.3522,
-      "Location": "Paris, France",
-      "PacketLoss": 0.0005,
-      "CostPerGFLOP": 0.002,
-      "Availability": 0.9995
+      "LocX": 30.29023,
+      "LocY": 71.4201,
+      "Location": "Multan, Pakistan"
     },
     {
-      "_comment": "Fog node régional #1 — Hauts-de-France (agro + supply chain / proche Lille)",
       "DeviceType": "Fog",
+      "Status": "active",
       "NodeType": "Node",
       "NodeName": "f1",
-      "NodeId": 1,
+      "NodeId": 2,
       "MaxCpuFreq": 50000,
       "MaxBufferSize": 6144,
       "IdleEnergyCoef": 15,
       "ExeEnergyCoef": 50,
-      "LocX": 50.6292,
-      "LocY": 3.0573,
-      "Location": "Lille, France",
-      "PacketLoss": 0.0008,
-      "CostPerGFLOP": 0.0015,
-      "Availability": 0.999
+      "Location": "Gilgit, Pakistan",
+      "LocX": 35.9208,
+      "LocY": 74.3147
     },
     {
-      "_comment": "Fog node régional #2 — Auvergne-Rhône-Alpes (capteurs montagne/viticulture / proche Lyon)",
       "DeviceType": "Fog",
+      "Status": "active",
       "NodeType": "Node",
       "NodeName": "f2",
-      "NodeId": 2,
+      "NodeId": 3,
       "MaxCpuFreq": 95000,
       "MaxBufferSize": 12288,
       "IdleEnergyCoef": 25,
       "ExeEnergyCoef": 120,
-      "LocX": 45.7640,
-      "LocY": 4.8357,
-      "Location": "Lyon, France",
-      "PacketLoss": 0.0006,
-      "CostPerGFLOP": 0.0018,
-      "Availability": 0.9993
+      "Location": "Karachi, Pakistan",
+      "LocX": 24.8607,
+      "LocY": 67.0011
     },
     {
-      "_comment": "Fog node régional #3 — Occitanie (agriculture + irrigation / proche Toulouse)",
       "DeviceType": "Fog",
+      "Status": "active",
       "NodeType": "Node",
       "NodeName": "f3",
-      "NodeId": 3,
+      "NodeId": 4,
       "MaxCpuFreq": 85000,
       "MaxBufferSize": 10240,
       "IdleEnergyCoef": 20,
       "ExeEnergyCoef": 100,
-      "LocX": 43.6047,
-      "LocY": 1.4442,
-      "Location": "Toulouse, France",
-      "PacketLoss": 0.0007,
-      "CostPerGFLOP": 0.0016,
-      "Availability": 0.9992
+      "Location": "Lahore, Pakistan",
+      "LocX": 31.5497,
+      "LocY": 74.3436
     },
     {
-      "_comment": "Fog node régional #4 — Nouvelle-Aquitaine (agriculture/viticulture / proche Bordeaux)",
       "DeviceType": "Fog",
+      "Status": "active",
       "NodeType": "Node",
       "NodeName": "f4",
-      "NodeId": 4,
+      "NodeId": 5,
       "MaxCpuFreq": 75000,
       "MaxBufferSize": 8192,
       "IdleEnergyCoef": 20,
       "ExeEnergyCoef": 100,
-      "LocX": 44.8378,
-      "LocY": -0.5792,
-      "Location": "Bordeaux, France",
-      "PacketLoss": 0.0007,
-      "CostPerGFLOP": 0.0016,
-      "Availability": 0.9992
+      "Location": "Peshawar, Pakistan",
+      "LocX": 34.0151,
+      "LocY": 71.5249
     },
-
     {
-      "_comment": "Cloud node #0 — France (data center centralisé, très puissant, plus coûteux que fog)",
       "DeviceType": "Cloud",
+      "Status": "active",
       "NodeType": "Node",
       "NodeName": "c0",
-      "NodeId": 5,
+      "NodeId": 6,
       "MaxCpuFreq": 500000,
       "MaxBufferSize": 51200,
       "IdleEnergyCoef": 300,
       "ExeEnergyCoef": 1100,
-      "LocX": 48.8566,
-      "LocY": 2.3522,
-      "Location": "Paris Region Cloud, France",
-      "PacketLoss": 0.0001,
-      "CostPerGFLOP": 0.01,
-      "Availability": 0.9999,
-      "CarbonIntensity": 50
+      "LocX": 1.277911,
+      "LocY": 103.848,
+      "Location": "Singapore"
     },
     {
-      "_comment": "Cloud node #1 — Europe (Belgique, très puissant, distant, utile pour redondance/DR)",
       "DeviceType": "Cloud",
+      "Status": "active",
       "NodeType": "Node",
       "NodeName": "c1",
-      "NodeId": 6,
+      "NodeId": 7,
       "MaxCpuFreq": 500000,
       "MaxBufferSize": 51200,
       "IdleEnergyCoef": 250,
       "ExeEnergyCoef": 1000,
       "LocX": 50.4738,
       "LocY": 3.8038,
-      "Location": "Saint-Ghislain, Belgium",
-      "PacketLoss": 0.0001,
-      "CostPerGFLOP": 0.009,
-      "Availability": 0.9999,
-      "CarbonIntensity": 40
+      "Location": "Saint-Ghislain, Belgium"
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "inactive",
+      "NodeType": "Node",
+      "NodeName": "f5",
+      "NodeId": 8,
+      "MaxCpuFreq": 100000,
+      "MaxBufferSize": 12288,
+      "IdleEnergyCoef": 28,
+      "ExeEnergyCoef": 140,
+      "LocX": 31.4504,
+      "LocY": 73.1350,
+      "Location": "Faisalabad, Pakistan",
+      "ActivationTimeSec": 300,
+      "ActivationEnergyCost": 1500
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "inactive",
+      "NodeType": "Node",
+      "NodeName": "f6",
+      "NodeId": 9,
+      "MaxCpuFreq": 80000,
+      "MaxBufferSize": 8192,
+      "IdleEnergyCoef": 22,
+      "ExeEnergyCoef": 110,
+      "LocX": 33.5651,
+      "LocY": 73.0169,
+      "Location": "Rawalpindi, Pakistan",
+      "ActivationTimeSec": 180,
+      "ActivationEnergyCost": 1200
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "inactive",
+      "NodeType": "Node",
+      "NodeName": "f7",
+      "NodeId": 10,
+      "MaxCpuFreq": 120000,
+      "MaxBufferSize": 16384,
+      "IdleEnergyCoef": 35,
+      "ExeEnergyCoef": 175,
+      "LocX": 30.1798,
+      "LocY": 66.9750,
+      "Location": "Quetta, Pakistan",
+      "ActivationTimeSec": 420,
+      "ActivationEnergyCost": 2000
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "inactive",
+      "NodeType": "Node",
+      "NodeName": "f8",
+      "NodeId": 11,
+      "MaxCpuFreq": 90000,
+      "MaxBufferSize": 10240,
+      "IdleEnergyCoef": 24,
+      "ExeEnergyCoef": 120,
+      "LocX": 32.1572,
+      "LocY": 74.1760,
+      "Location": "Gujranwala, Pakistan",
+      "ActivationTimeSec": 240,
+      "ActivationEnergyCost": 1300
     }
   ],
-
   "Edges": [
     {
-      "_comment": "Liens Fog->Cloud (uplink). Un lien par fog node vers un cloud (cloud principal ou secondaire).",
-      "EdgeType": "Link",
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 0,
+      "DstNodeID": 1,
+      "Bandwidth": 2500,
+      "LatencyMs": 8
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 1,
+      "DstNodeID": 0,
+      "Bandwidth": 1700,
+      "LatencyMs": 8
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 0,
+      "DstNodeID": 2,
+      "Bandwidth": 1000,
+      "LatencyMs": 15
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 2,
+      "DstNodeID": 0,
+      "Bandwidth": 700,
+      "LatencyMs": 15
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 0,
+      "DstNodeID": 3,
+      "Bandwidth": 2000,
+      "LatencyMs": 20
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 3,
+      "DstNodeID": 0,
+      "Bandwidth": 1500,
+      "LatencyMs": 20
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 0,
+      "DstNodeID": 4,
+      "Bandwidth": 1500,
+      "LatencyMs": 6
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 4,
+      "DstNodeID": 0,
+      "Bandwidth": 1200,
+      "LatencyMs": 6
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
       "SrcNodeID": 0,
       "DstNodeID": 5,
-      "Bandwidth": 3500,
-      "NetworkLatency": "calculated",
-      "BaseLatencyMs": 5,
-      "PacketLoss": 0.001,
-      "CostPerGB": 0.05
+      "Bandwidth": 1200,
+      "LatencyMs": 10
     },
     {
-      "EdgeType": "Link",
-      "SrcNodeID": 1,
-      "DstNodeID": 6,
-      "Bandwidth": 3200,
-      "NetworkLatency": "calculated",
-      "BaseLatencyMs": 8,
-      "PacketLoss": 0.0012,
-      "CostPerGB": 0.06
-    },
-    {
-      "EdgeType": "Link",
-      "SrcNodeID": 2,
-      "DstNodeID": 5,
-      "Bandwidth": 3300,
-      "NetworkLatency": "calculated",
-      "BaseLatencyMs": 15,
-      "PacketLoss": 0.0015,
-      "CostPerGB": 0.055
-    },
-    {
-      "EdgeType": "Link",
-      "SrcNodeID": 3,
-      "DstNodeID": 5,
-      "Bandwidth": 3000,
-      "NetworkLatency": "calculated",
-      "BaseLatencyMs": 25,
-      "PacketLoss": 0.0018,
-      "CostPerGB": 0.06
-    },
-    {
-      "EdgeType": "Link",
-      "SrcNodeID": 4,
-      "DstNodeID": 5,
-      "Bandwidth": 3100,
-      "NetworkLatency": "calculated",
-      "BaseLatencyMs": 20,
-      "PacketLoss": 0.0016,
-      "CostPerGB": 0.058
-    },
-
-    {
-      "_comment": "Liens Cloud->Fog (downlink). À garder si ton simulateur exige 2 arcs (sinon tu peux supprimer).",
-      "EdgeType": "Link",
+      "EdgeType": "SingleLink",
+      "Status": "active",
       "SrcNodeID": 5,
       "DstNodeID": 0,
-      "Bandwidth": 3500,
-      "NetworkLatency": "calculated",
-      "BaseLatencyMs": 5,
-      "PacketLoss": 0.001,
-      "CostPerGB": 0.05
+      "Bandwidth": 1000,
+      "LatencyMs": 10
     },
     {
       "EdgeType": "Link",
-      "SrcNodeID": 6,
-      "DstNodeID": 1,
-      "Bandwidth": 3200,
-      "NetworkLatency": "calculated",
-      "BaseLatencyMs": 8,
-      "PacketLoss": 0.0012,
-      "CostPerGB": 0.06
-    },
-    {
-      "EdgeType": "Link",
-      "SrcNodeID": 5,
-      "DstNodeID": 2,
-      "Bandwidth": 3300,
-      "NetworkLatency": "calculated",
-      "BaseLatencyMs": 15,
-      "PacketLoss": 0.0015,
-      "CostPerGB": 0.055
-    },
-    {
-      "EdgeType": "Link",
-      "SrcNodeID": 5,
-      "DstNodeID": 3,
-      "Bandwidth": 3000,
-      "NetworkLatency": "calculated",
-      "BaseLatencyMs": 25,
-      "PacketLoss": 0.0018,
-      "CostPerGB": 0.06
-    },
-    {
-      "EdgeType": "Link",
-      "SrcNodeID": 5,
-      "DstNodeID": 4,
-      "Bandwidth": 3100,
-      "NetworkLatency": "calculated",
-      "BaseLatencyMs": 20,
-      "PacketLoss": 0.0016,
-      "CostPerGB": 0.058
-    },
-
-    {
-      "_comment": "Optionnel: lien Cloud<->Cloud (réplication / fallback inter-région).",
-      "EdgeType": "Link",
-      "SrcNodeID": 5,
+      "Status": "active",
+      "SrcNodeID": 0,
       "DstNodeID": 6,
-      "Bandwidth": 6000,
-      "NetworkLatency": "calculated",
-      "BaseLatencyMs": 10,
-      "PacketLoss": 0.0005,
-      "CostPerGB": 0.02
+      "Bandwidth": 3000,
+      "LatencyMs": 80
     },
     {
       "EdgeType": "Link",
-      "SrcNodeID": 6,
-      "DstNodeID": 5,
-      "Bandwidth": 6000,
-      "NetworkLatency": "calculated",
-      "BaseLatencyMs": 10,
-      "PacketLoss": 0.0005,
-      "CostPerGB": 0.02
+      "Status": "active",
+      "SrcNodeID": 0,
+      "DstNodeID": 7,
+      "Bandwidth": 3000,
+      "LatencyMs": 120
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 0,
+      "DstNodeID": 8,
+      "Bandwidth": 1800,
+      "LatencyMs": 7,
+      "ActivationTimeSec": 60
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 8,
+      "DstNodeID": 0,
+      "Bandwidth": 1400,
+      "LatencyMs": 7,
+      "ActivationTimeSec": 60
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 0,
+      "DstNodeID": 9,
+      "Bandwidth": 2200,
+      "LatencyMs": 3,
+      "ActivationTimeSec": 45
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 9,
+      "DstNodeID": 0,
+      "Bandwidth": 1800,
+      "LatencyMs": 3,
+      "ActivationTimeSec": 45
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 0,
+      "DstNodeID": 10,
+      "Bandwidth": 1600,
+      "LatencyMs": 25,
+      "ActivationTimeSec": 90
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 10,
+      "DstNodeID": 0,
+      "Bandwidth": 1200,
+      "LatencyMs": 25,
+      "ActivationTimeSec": 90
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 0,
+      "DstNodeID": 11,
+      "Bandwidth": 1900,
+      "LatencyMs": 5,
+      "ActivationTimeSec": 50
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 11,
+      "DstNodeID": 0,
+      "Bandwidth": 1500,
+      "LatencyMs": 5,
+      "ActivationTimeSec": 50
     }
   ],
-
-  "_comment_calculations": "Latence totale = BaseLatencyMs + (haversine_distance_km / 200) ms. PacketLoss: probabilité par paquet. CostPerGB: en euros.",
-  "SimulationDefaults": {
-    "TickDurationSeconds": 1,
-    "DataTransferRateGBperHour": 10,
-    "MaxSimulationTicks": 10000,
-    "QoSTargets": {
-      "MaxLatencyMs": 100,
-      "MaxPacketLoss": 0.01,
-      "MinAvailability": 0.99
-    }
+  "BaseLatencyType": "haversine",
+  "ScalingConstraints": {
+    "MaxActiveFogNodes": 8,
+    "MinActiveFogNodes": 3,
+    "ActivationCooldownSec": 300,
+    "DeactivationCooldownSec": 900,
+    "CostPerActivation": 5.0,
+    "MigrationOverheadFactor": 0.15
+  },
+  "NetworkDefaults": {
+    "PacketLoss": 0.001,
+    "CostPerGB": 0.05,
+    "EnergyCostPerKWh": 0.15
   }
 }

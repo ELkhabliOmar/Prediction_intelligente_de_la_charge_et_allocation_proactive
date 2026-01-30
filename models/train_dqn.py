@@ -99,6 +99,7 @@ def main():
     ap.add_argument("--target_update", type=int, default=1000)
     ap.add_argument("--warmup", type=int, default=2000)
     ap.add_argument("--dropout", type=float, default=0.1)
+    ap.add_argument("--lr", type=float, default=0.001, help="Learning rate")
     args = ap.parse_args()
 
     set_seed(args.seed)
@@ -127,7 +128,7 @@ def main():
     target = DQN(hidden_dim=args.hidden_dim, dropout=args.dropout).to(device)
     target.load_state_dict(dqn.state_dict())
 
-    opt = torch.optim.Adam(dqn.parameters(), lr=1e-3, weight_decay=1e-5)
+    opt = torch.optim.Adam(dqn.parameters(), lr=args.lr, weight_decay=1e-5)
     loss_fn = nn.SmoothL1Loss()
 
     replay = deque(maxlen=args.replay_size)

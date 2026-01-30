@@ -1,10 +1,11 @@
-# project/test.py
+# project/test.py - VERSION CORRIGÉE
 from __future__ import annotations
 
 import argparse
 import os
 import random
 import sys
+import json
 from pathlib import Path
 import networkx as nx
 
@@ -60,6 +61,7 @@ def main():
     ap.add_argument("--ticks", type=int, default=200)
     ap.add_argument("--W", type=int, default=10)
     ap.add_argument("--target_util", type=float, default=0.70)
+    ap.add_argument("--down_threshold", type=float, default=0.30)  # ✅ NOUVEAU PARAMÈTRE
     ap.add_argument("--min_fog_cpu", type=int, default=30)
     ap.add_argument("--output_csv", default=DEFAULT_RESULTS)
     ap.add_argument("--seed", type=int, default=42)
@@ -89,13 +91,13 @@ def main():
         ["Workload", args.workload],
         ["Tasks (CSV total)", str(nb_total)],
         ["Tasks (arrivent dans [0..ticks-1])", str(nb_in_window)],
+        ["Timestamps range", f"[{min_ts} .. {max_ts}]"],
         ["Ticks", str(args.ticks)],
         ["W (MAPE)", str(args.W)],
         ["Target util", str(args.target_util)],
+        ["Down threshold", str(args.down_threshold)],  # ✅ AFFICHÉ
         ["Output CSV", args.output_csv],
     ]
-    if min_ts is not None:
-        info_rows.insert(2, ["Timestamps range", f"[{min_ts} .. {max_ts}]"])
 
     print_table(["Param", "Value"], info_rows, title="⚙️ Paramètres")
 
@@ -128,8 +130,10 @@ def main():
     # ============================
     module1 = Module1_LSTMPredictor(model_path=args.lstm_model, device="cpu")
 
-    # ⚠️ Le downscaling se corrige dans Module2_ProactivePlanner (sim_core.py)
+    # ✅ Module2 avec down_threshold passé explicitement
     module2 = Module2_HVWPO_Planner(
+        target_util=args.target_util,
+        down_threshold=args.down_threshold,  # ✅ PARAMÈTRE IMPORTANT
         min_fog_cpu=args.min_fog_cpu,
         ema_alpha=0.25,
         cooldown_windows=2,
@@ -138,19 +142,12 @@ def main():
 
     module3 = Module3_Scheduler(dqn_path=args.dqn_model, cpu_threshold_cloud=300, warmup_ticks=15)
 
-    # ✅ On passe aussi le nb de noeuds pour éviter confusion dans les logs si sim_core l’utilise
-    n_fog_nodes = 5
-    n_cloud_nodes = 2
-
     setup_state(
         workload_idx,
         module1,
         module2,
         module3,
         W=args.W,
-        # si setup_state accepte des kwargs, ça aide à logger/valider
-        n_fog_nodes=n_fog_nodes,
-        n_cloud_nodes=n_cloud_nodes,
         ticks=args.ticks,
     )
 
@@ -159,44 +156,70 @@ def main():
     # ============================
     simulator = Simulator(tick_duration=1, tick_unit="seconds")
 
-    # Nodes
-    fog_specs = [
-        ("Fog-Paris",     [48.8566,  2.3522], 120),
-        ("Fog-Lille",     [50.6292,  3.0573],  90),
-        ("Fog-Lyon",      [45.7640,  4.8357], 110),
-        ("Fog-Toulouse",  [43.6047,  1.4442], 100),
-        ("Fog-Bordeaux",  [44.8378, -0.5792],  95),
-    ]
-    for name, coord, cpu in fog_specs:
-        cpu_scaled = int(max(10, cpu * float(args.fog_scale)))
-        fog = EdgeServer(cpu=cpu_scaled, memory=8192, disk=20000)
-        fog.name = name
-        fog.coordinates = coord
-        fog.base_cpu = cpu_scaled  # utile pour downscale si sim_core l’utilise
+    # ============================
+    # 🌐 CHARGEMENT TOPOLOGIE JSON
+    # ============================
+    topo_path = ROOT_DIR / "topology" / "fog_cloud_topology.json"
+    if not topo_path.exists():
+        raise FileNotFoundError(f"Topologie introuvable: {topo_path}")
 
-    cloud_specs = [
-        ("Cloud-FR", [48.8566, 2.3522], 1500),
-        ("Cloud-BE", [50.4738, 3.8038], 1500),
-    ]
-    for name, coord, cpu in cloud_specs:
-        cloud = EdgeServer(cpu=cpu, memory=200000, disk=200000)
-        cloud.name = name
-        cloud.coordinates = coord
+    with open(topo_path, "r") as f:
+        topo_data = json.load(f)
+
+    # Dictionnaires pour mapping ID -> Objet (pour NetworkX)
+    nodes_map = {}
+    
+    n_fog_nodes = 0
+    n_cloud_nodes = 0
+
+    # 1. Création des Noeuds
+    for node_data in topo_data.get("Nodes", []):
+        # On récupère les infos
+        name = node_data.get("NodeName", f"Node-{node_data.get('NodeId')}")
+        cpu_freq = int(node_data.get("MaxCpuFreq", 1000))
+        # Conversion approximative MHz -> Unités de simulation (si besoin, sinon direct)
+        base_cpu = int((cpu_freq / 1000) * args.fog_scale) if node_data.get("DeviceType") == "Fog" else int(cpu_freq / 1000)
+        base_cpu = max(10, base_cpu)
+
+        mem = int(node_data.get("MaxBufferSize", 4096))
+        loc_x = float(node_data.get("LocX", 0.0))
+        loc_y = float(node_data.get("LocY", 0.0))
+        status = node_data.get("Status", "active")
+        device_type = node_data.get("DeviceType", "Edge")
+
+        server = EdgeServer(cpu=base_cpu, memory=mem, disk=100000)
+        server.name = name
+        server.coordinates = [loc_x, loc_y]
+        server.base_cpu = base_cpu
+        server.status = status  # "active" ou "inactive"
+        server.device_type = device_type
+        
+        nodes_map[node_data["NodeId"]] = server
+
+        if "Fog" in device_type:
+            n_fog_nodes += 1
+        elif "Cloud" in device_type:
+            n_cloud_nodes += 1
 
     # ============================
     # 🌐 TOPOLOGIE RÉSEAU (NetworkX)
     # ============================
     # On définit un graphe pour gérer les latences (Fog=rapide, Cloud=lent)
     topology = nx.Graph()
-    core_switch = "Internet-Core"
-    topology.add_node(core_switch, type="Switch")
-
-    for server in EdgeServer.all():
-        # Latence: Fog=5ms, Cloud=50ms
-        is_fog = "Fog" in server.name
-        link_latency = 5 if is_fog else 50
-        link_bw = 1000 if is_fog else 10000
-        topology.add_edge(server, core_switch, latency=link_latency, bandwidth=link_bw)
+    
+    # Ajout des liens définis dans le JSON
+    for edge in topo_data.get("Edges", []):
+        src_id = edge.get("SrcNodeID")
+        dst_id = edge.get("DstNodeID")
+        
+        if src_id in nodes_map and dst_id in nodes_map:
+            n1 = nodes_map[src_id]
+            n2 = nodes_map[dst_id]
+            lat = float(edge.get("LatencyMs", 10))
+            bw = float(edge.get("Bandwidth", 1000))
+            
+            # EdgeSimPy utilise topology pour le routing
+            topology.add_edge(n1, n2, latency=lat, bandwidth=bw)
 
     simulator.topology = topology
 

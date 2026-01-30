@@ -81,7 +81,7 @@ def print_tick(
     worst: float,
     fog_n: int,
     cloud_n: int,
-    fog_nodes: int = 0,
+    fog_nodes: Any = 0,
     cloud_nodes: int = 0
 ):
     bar_len = 26
@@ -97,6 +97,19 @@ def print_tick(
     else:
         p_col = "red"
 
+    # Formatage liste des noeuds (ex: "3 (1,2,3)")
+    if isinstance(fog_nodes, (set, list)) and len(fog_nodes) > 0:
+        names = sorted(list(fog_nodes))
+        # On essaie de garder ça court (f1 -> 1)
+        short_names = []
+        for n in names:
+            clean = str(n).replace("Fog-", "").replace("f", "").replace("Node-", "")
+            short_names.append(clean)
+        nodes_str = ",".join(short_names)
+        fog_nodes_disp = f"{len(names)} ({nodes_str})"
+    else:
+        fog_nodes_disp = str(fog_nodes)
+
     print(
         f"{c(f'T{t:03d}', 'cyan', bold=True)} "
         f"poolCPU={c(active_cpu,'white',bold=True)}/{cap} "
@@ -104,7 +117,7 @@ def print_tick(
         f"{c(bar, p_col)} "
         f"worst={c(f'{worst:.2f}', 'magenta', bold=True)} "
         f"| placed tasks fog={c(fog_n,'green',bold=True)} cloud={c(cloud_n,'blue',bold=True)} "
-        f"| nodes fog={c(fog_nodes,'green',bold=True)} cloud={c(cloud_nodes,'blue',bold=True)}"
+        f"| nodes fog={c(fog_nodes_disp,'green',bold=True)} cloud={c(cloud_nodes,'blue',bold=True)}"
     )
 
 
