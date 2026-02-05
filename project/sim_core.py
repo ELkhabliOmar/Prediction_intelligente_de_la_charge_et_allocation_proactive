@@ -8,6 +8,7 @@ from typing import Dict, List, Any, DefaultDict, Optional, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 
 from project.ui_utils import print_tick, print_mape_block
@@ -70,39 +71,66 @@ GLOBAL_IMAGE = build_global_image_no_layers()
 # =========================================================
 # Models (LSTM + DQN) - INCHANGÉS
 # =========================================================
-class EnhancedLSTM(nn.Module):
-    def __init__(self, input_dim=1, hidden_dim=128, num_layers=2, dropout=0.3):
+# --- Classe BayesianLSTM (Mise à jour pour compatibilité train_lstm.py) ---
+# Modèle probabiliste avec Attention et Incertitude (Monte Carlo Dropout)
+class BayesianLSTM(nn.Module):
+    def __init__(self, input_dim=1, hidden_dim=256, num_layers=3, dropout=0.4):
         super().__init__()
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.dropout_p = dropout
+        
         self.lstm = nn.LSTM(
             input_size=input_dim,
             hidden_size=hidden_dim,
             num_layers=num_layers,
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0,
-            bidirectional=False,
+            bidirectional=True, # ✅ Bidirectionnel comme dans l'entraînement
         )
-        self.dropout = nn.Dropout(dropout)
+        
         self.attention = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.Linear(hidden_dim * 2, hidden_dim),
             nn.Tanh(),
-            nn.Linear(hidden_dim // 2, 1),
+            nn.Linear(hidden_dim, 1)
         )
-        self.fc_layers = nn.Sequential(
+        
+        # Tête pour la moyenne
+        self.mean_layer = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
-            nn.Dropout(dropout * 0.5),
-            nn.Linear(hidden_dim // 2, 32),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+        
+        # Tête pour la variance (incertitude)
+        self.logvar_layer = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim // 2),
             nn.ReLU(),
-            nn.Linear(32, 1),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, 1),
+            nn.Softplus()
         )
 
-    def forward(self, x):
+    def forward(self, x, return_uncertainty=False, mc_samples=1):
         lstm_out, _ = self.lstm(x)
-        att_w = torch.softmax(self.attention(lstm_out), dim=1)
-        context = torch.sum(att_w * lstm_out, dim=1)
-        context = self.dropout(context)
-        return self.fc_layers(context)
+        
+        # Attention simple
+        att_weights = F.softmax(self.attention(lstm_out), dim=1)
+        context = torch.sum(att_weights * lstm_out, dim=1)
+        
+        # Dropout actif si training ou MC sampling
+        context = F.dropout(context, p=self.dropout_p, training=self.training or (mc_samples > 1))
+        
+        mean = self.mean_layer(context)
+        # On ignore logvar pour l'inférence simple ici, géré dans predict
+        return mean
 
+# --- Classe DQN ---
+# Réseau de neurones profond (Deep Q-Network) pour l'apprentissage par renforcement.
+# Prend l'état du système en entrée et retourne les Q-values pour chaque action (Fog ou Cloud).
 class DQN(nn.Module):
     def __init__(self, input_dim=5, output_dim=2, hidden_dim=128, dropout=0.1):
         super().__init__()
@@ -119,13 +147,16 @@ class DQN(nn.Module):
 # =========================================================
 # Module1 - INCHANGÉ
 # =========================================================
+# --- Classe Module1_LSTMPredictor (ANALYZE) ---
+# Responsable de charger le modèle LSTM et de fournir des prédictions de charge future.
+# Gère également un mécanisme de "fallback" (secours) si le modèle n'est pas disponible ou si l'historique est insuffisant.
 class Module1_LSTMPredictor:
     def __init__(self, model_path: str, horizons=None, device="cpu"):
         self.horizons = horizons or [5, 15, 30, 60]
         self.seq_len = 30
         self.max_util = 1.0
-        self.hidden_dim = 128
-        self.num_layers = 2
+        self.hidden_dim = 256 # ✅ Ajusté au défaut de train_lstm
+        self.num_layers = 3   # ✅ Ajusté au défaut de train_lstm
         self.dropout = 0.3
         self.model_loaded = False
         self.device = device
@@ -134,14 +165,29 @@ class Module1_LSTMPredictor:
         if os.path.exists(model_path):
             try:
                 ckpt = torch.load(model_path, map_location="cpu")
-                self.seq_len = int(ckpt.get("seq_len", self.seq_len))
-                self.max_util = float(ckpt.get("max_util", self.max_util))
-                self.hidden_dim = int(ckpt.get("hidden_dim", self.hidden_dim))
-                self.num_layers = int(ckpt.get("num_layers", self.num_layers))
-                self.dropout = float(ckpt.get("dropout", self.dropout))
+                
+                # ✅ FIX: Support du format avec 'model_config' (train_lstm.py)
+                if "model_config" in ckpt:
+                    cfg = ckpt["model_config"]
+                    self.seq_len = int(cfg.get("seq_len", self.seq_len))
+                    self.hidden_dim = int(cfg.get("hidden_dim", self.hidden_dim))
+                    self.num_layers = int(cfg.get("num_layers", self.num_layers))
+                    self.dropout = float(cfg.get("dropout", self.dropout))
+                else:
+                    # Support ancien format (clés à la racine)
+                    self.seq_len = int(ckpt.get("seq_len", self.seq_len))
+                    self.hidden_dim = int(ckpt.get("hidden_dim", self.hidden_dim))
+                    self.num_layers = int(ckpt.get("num_layers", self.num_layers))
+                    self.dropout = float(ckpt.get("dropout", self.dropout))
 
-                self.model = EnhancedLSTM(
-                    input_dim=1,
+                # ✅ FIX: Support normalization
+                if "normalization" in ckpt:
+                    self.max_util = float(ckpt["normalization"].get("pressure_max", self.max_util))
+                else:
+                    self.max_util = float(ckpt.get("max_util", self.max_util))
+
+                self.model = BayesianLSTM(
+                    input_dim=4, # ✅ Le modèle entraîné attend 4 features
                     hidden_dim=self.hidden_dim,
                     num_layers=self.num_layers,
                     dropout=self.dropout,
@@ -156,6 +202,7 @@ class Module1_LSTMPredictor:
         else:
             print(f"[Module1] ⚠️ modèle LSTM introuvable: {model_path} -> fallback")
 
+    # Calcule l'écart-type glissant pour estimer la volatilité récente de la charge.
     @staticmethod
     def _rolling_std(values: List[float]) -> float:
         if len(values) < 2:
@@ -163,6 +210,9 @@ class Module1_LSTMPredictor:
         arr = np.array(values, dtype=float)
         return float(max(0.01, arr.std()))
 
+    # --- Méthode predict ---
+    # Prend l'historique de pression (deque), prépare les données pour le LSTM,
+    # exécute l'inférence et retourne la prédiction avec une estimation de l'incertitude.
     def predict(self, pressure_history: deque) -> Dict[int, Dict[str, float]]:
         hist_all = list(pressure_history)
         if len(hist_all) < 3:
@@ -192,9 +242,22 @@ class Module1_LSTMPredictor:
         hist_clip = [max(0.0, min(x, 3.0)) for x in hist]
         hist_norm = [max(0.0, min(x / self.max_util, 3.0)) for x in hist_clip]
 
-        x = torch.tensor(hist_norm, dtype=torch.float32).view(1, seq_len, 1).to(self.device)
+        # ✅ Construction des 4 features pour l'inférence (Pressure, Density, Hour, Trend)
+        # Comme on est en live, on approxime les features secondaires
+        features = []
+        for i in range(len(hist_norm)):
+            p_val = hist_norm[i]
+            # Feature 1: Pressure (réelle)
+            # Feature 2: Density (approx 0.5 neutre)
+            # Feature 3: Hour (cyclique simulé)
+            # Feature 4: Trend (linéaire)
+            feat_vec = [p_val, 0.5, (i / seq_len), (i / seq_len)]
+            features.append(feat_vec)
+
+        x = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device) # (1, seq_len, 4)
+        
         with torch.no_grad():
-            y_norm = float(self.model(x).item())
+            y_norm = float(self.model(x, mc_samples=1).item()) # Inférence simple
         pred_p = max(0.0, y_norm * self.max_util)
 
         if mean_last_5 < 0.3:
@@ -221,6 +284,9 @@ class Module1_LSTMPredictor:
 # =========================================================
 # Module2 - VERSION CORRIGÉE: Horizontal Only + Scale Down Actif
 # =========================================================
+# --- Classe Module2_HVWPO_Planner (PLAN) ---
+# Implémente l'algorithme de planification H-VWPO.
+# Décide du Scaling (ajouter/retirer des nœuds) et de l'Offloading (ratio de tâches vers le Cloud) basé sur les prédictions.
 class Module2_HVWPO_Planner:
     """
     Module 2: H-VWPO (Horizontal-Vertical Workload Prediction & Offloading).
@@ -249,6 +315,9 @@ class Module2_HVWPO_Planner:
         # ✅ Fenêtre plus longue pour stabilité downscale
         self.pressure_window = deque(maxlen=8)
 
+    # --- Méthode plan ---
+    # Cœur de la logique de décision proactive.
+    # Compare la charge prédite (robuste) aux seuils pour décider 'up', 'down' ou 'none', et calcule le ratio d'offloading.
     def plan(self, predictions, total_fog_capacity, total_incoming_demand, current_pressure, 
              current_t, W_window, worst_pressure=0.0, active_nodes_count=1):
         
@@ -357,6 +426,9 @@ class Module2_HVWPO_Planner:
 # =========================================================
 # Module3 - INCHANGÉ
 # =========================================================
+# --- Classe Module3_Scheduler (EXECUTE) ---
+# Responsable du placement tâche par tâche.
+# Utilise soit une heuristique (baseline), soit le modèle DQN entraîné pour choisir entre Fog et Cloud.
 class Module3_Scheduler:
     def __init__(self, dqn_path: str = None, cpu_threshold_cloud=300, warmup_ticks=15):
         self.cpu_threshold_cloud = int(cpu_threshold_cloud)
@@ -384,6 +456,8 @@ class Module3_Scheduler:
         else:
             print("[Module3] ℹ️ DQN absent -> baseline")
 
+    # Stratégie de base (heuristique) utilisée quand le DQN n'est pas prêt ou échoue.
+    # Envoie au Cloud si la tâche est grosse ou si la pression est critique.
     def baseline(self, task_cpu: int, offload_ratio: float, pressure: float) -> str:
         if pressure < 0.40:
             offload_ratio = 0.0
@@ -395,6 +469,9 @@ class Module3_Scheduler:
             return "Cloud"
         return "Fog"
 
+    # --- Méthode decide ---
+    # Prend les caractéristiques de la tâche et l'état du système.
+    # Interroge le réseau DQN pour obtenir l'action optimale (0=Fog, 1=Cloud).
     def decide(self, task_cpu: int, task_ram: int, pressure: float, fog_cpu: int, offload_ratio: float, t: int):
         if pressure >= 0.95:
             return "Cloud", False
@@ -427,6 +504,7 @@ class Module3_Scheduler:
 # =========================================================
 # Workload helpers - INCHANGÉS
 # =========================================================
+# Charge le fichier CSV de workload et l'indexe par timestamp pour un accès rapide pendant la simulation.
 def load_workload_indexed(path: str) -> DefaultDict[int, List[dict]]:
     idx = defaultdict(list)
     with open(path, "r", newline="", encoding="utf-8") as f:
@@ -436,6 +514,7 @@ def load_workload_indexed(path: str) -> DefaultDict[int, List[dict]]:
             idx[task["timestamp"]].append(task)
     return idx
 
+# Normalise une ligne du CSV (gère différents formats de colonnes) pour avoir un dictionnaire standardisé.
 def _normalize_task_row(row: Dict[str, Any]) -> Dict[str, Any]:
     if "task_id" in row and "timestamp" in row:
         return {
@@ -470,9 +549,11 @@ def _normalize_task_row(row: Dict[str, Any]) -> Dict[str, Any]:
 # =========================================================
 # Multi-node helpers - INCHANGÉS
 # =========================================================
+# Calcule la somme des demandes CPU des services actifs sur un serveur donné.
 def active_cpu_on_server(active_services: List[Service], server: EdgeServer) -> int:
     return int(sum(s.cpu_demand for s in active_services if getattr(s, "placed_on_server", None) == server))
 
+# Calcule le ratio d'utilisation (pression) d'un serveur spécifique.
 def pressure_server(active_services: List[Service], server: EdgeServer) -> float:
     cpu = active_cpu_on_server(active_services, server)
     return float(cpu) / max(1.0, float(server.cpu))
@@ -514,6 +595,8 @@ def pick_least_loaded_active_fog(fogs: List[EdgeServer], active_services: List[S
 # =========================================================
 # Helper vertical downscale - AMÉLIORÉ
 # =========================================================
+# Tente de réduire la capacité CPU d'un nœud (Scaling Vertical Down) pour économiser de l'énergie
+# si la charge actuelle le permet.
 def _vertical_downscale(fog_node, active_services, min_fog_cpu=30):
     """
     ✅ Vertical downscale uniquement (pas de up)
@@ -577,6 +660,9 @@ def get_metrics():
 # =========================================================
 # Main algorithm - VERSION CORRIGÉE: Horizontal Only
 # =========================================================
+# --- Algorithme Principal (Boucle de Simulation) ---
+# Cette fonction est appelée à chaque "tick" par le simulateur.
+# Elle orchestre : Fin des tâches, Arrivée des tâches, Placement (Module 3), Monitoring, et Planification périodique (Module 1 & 2).
 def proactive_placement_algorithm(parameters):
     global CURRENT_T, ACTIVE_SERVICES, PRESSURE_HISTORY, PREDICTIONS, PLAN, SIMULATION_METRICS, CLOUD_RR, TOTAL_SCALE_UP, TOTAL_SCALE_DOWN, TOTAL_ENERGY_JOULES
 

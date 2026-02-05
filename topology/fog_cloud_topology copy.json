@@ -1,0 +1,364 @@
+{
+  "Nodes": [
+    {
+      "DeviceType": "Edge",
+      "Status": "active",
+      "NodeType": "Node",
+      "NodeName": "e0",
+      "NodeId": 0,
+      "MaxCpuFreq": 10000,
+      "MaxBufferSize": 4096,
+      "IdleEnergyCoef": 3.0,
+      "ExeEnergyCoef": 10.0,
+      "LocX": 33.68742,
+      "LocY": 73.0078,
+      "Location": "Islamabad, Pakistan"
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "active",
+      "NodeType": "Node",
+      "NodeName": "f0",
+      "NodeId": 1,
+      "MaxCpuFreq": 110000,
+      "MaxBufferSize": 16384,
+      "IdleEnergyCoef": 30,
+      "ExeEnergyCoef": 150,
+      "LocX": 30.29023,
+      "LocY": 71.4201,
+      "Location": "Multan, Pakistan"
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "active",
+      "NodeType": "Node",
+      "NodeName": "f1",
+      "NodeId": 2,
+      "MaxCpuFreq": 50000,
+      "MaxBufferSize": 6144,
+      "IdleEnergyCoef": 15,
+      "ExeEnergyCoef": 50,
+      "Location": "Gilgit, Pakistan",
+      "LocX": 35.9208,
+      "LocY": 74.3147
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "active",
+      "NodeType": "Node",
+      "NodeName": "f2",
+      "NodeId": 3,
+      "MaxCpuFreq": 95000,
+      "MaxBufferSize": 12288,
+      "IdleEnergyCoef": 25,
+      "ExeEnergyCoef": 120,
+      "Location": "Karachi, Pakistan",
+      "LocX": 24.8607,
+      "LocY": 67.0011
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "active",
+      "NodeType": "Node",
+      "NodeName": "f3",
+      "NodeId": 4,
+      "MaxCpuFreq": 85000,
+      "MaxBufferSize": 10240,
+      "IdleEnergyCoef": 20,
+      "ExeEnergyCoef": 100,
+      "Location": "Lahore, Pakistan",
+      "LocX": 31.5497,
+      "LocY": 74.3436
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "active",
+      "NodeType": "Node",
+      "NodeName": "f4",
+      "NodeId": 5,
+      "MaxCpuFreq": 75000,
+      "MaxBufferSize": 8192,
+      "IdleEnergyCoef": 20,
+      "ExeEnergyCoef": 100,
+      "Location": "Peshawar, Pakistan",
+      "LocX": 34.0151,
+      "LocY": 71.5249
+    },
+    {
+      "DeviceType": "Cloud",
+      "Status": "active",
+      "NodeType": "Node",
+      "NodeName": "c0",
+      "NodeId": 6,
+      "MaxCpuFreq": 500000,
+      "MaxBufferSize": 51200,
+      "IdleEnergyCoef": 300,
+      "ExeEnergyCoef": 1100,
+      "LocX": 1.277911,
+      "LocY": 103.848,
+      "Location": "Singapore"
+    },
+    {
+      "DeviceType": "Cloud",
+      "Status": "active",
+      "NodeType": "Node",
+      "NodeName": "c1",
+      "NodeId": 7,
+      "MaxCpuFreq": 500000,
+      "MaxBufferSize": 51200,
+      "IdleEnergyCoef": 250,
+      "ExeEnergyCoef": 1000,
+      "LocX": 50.4738,
+      "LocY": 3.8038,
+      "Location": "Saint-Ghislain, Belgium"
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "inactive",
+      "NodeType": "Node",
+      "NodeName": "f5",
+      "NodeId": 8,
+      "MaxCpuFreq": 100000,
+      "MaxBufferSize": 12288,
+      "IdleEnergyCoef": 28,
+      "ExeEnergyCoef": 140,
+      "LocX": 31.4504,
+      "LocY": 73.1350,
+      "Location": "Faisalabad, Pakistan",
+      "ActivationTimeSec": 300,
+      "ActivationEnergyCost": 1500
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "inactive",
+      "NodeType": "Node",
+      "NodeName": "f6",
+      "NodeId": 9,
+      "MaxCpuFreq": 80000,
+      "MaxBufferSize": 8192,
+      "IdleEnergyCoef": 22,
+      "ExeEnergyCoef": 110,
+      "LocX": 33.5651,
+      "LocY": 73.0169,
+      "Location": "Rawalpindi, Pakistan",
+      "ActivationTimeSec": 180,
+      "ActivationEnergyCost": 1200
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "inactive",
+      "NodeType": "Node",
+      "NodeName": "f7",
+      "NodeId": 10,
+      "MaxCpuFreq": 120000,
+      "MaxBufferSize": 16384,
+      "IdleEnergyCoef": 35,
+      "ExeEnergyCoef": 175,
+      "LocX": 30.1798,
+      "LocY": 66.9750,
+      "Location": "Quetta, Pakistan",
+      "ActivationTimeSec": 420,
+      "ActivationEnergyCost": 2000
+    },
+    {
+      "DeviceType": "Fog",
+      "Status": "inactive",
+      "NodeType": "Node",
+      "NodeName": "f8",
+      "NodeId": 11,
+      "MaxCpuFreq": 90000,
+      "MaxBufferSize": 10240,
+      "IdleEnergyCoef": 24,
+      "ExeEnergyCoef": 120,
+      "LocX": 32.1572,
+      "LocY": 74.1760,
+      "Location": "Gujranwala, Pakistan",
+      "ActivationTimeSec": 240,
+      "ActivationEnergyCost": 1300
+    }
+  ],
+  "Edges": [
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 0,
+      "DstNodeID": 1,
+      "Bandwidth": 2500,
+      "LatencyMs": 8
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 1,
+      "DstNodeID": 0,
+      "Bandwidth": 1700,
+      "LatencyMs": 8
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 0,
+      "DstNodeID": 2,
+      "Bandwidth": 1000,
+      "LatencyMs": 15
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 2,
+      "DstNodeID": 0,
+      "Bandwidth": 700,
+      "LatencyMs": 15
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 0,
+      "DstNodeID": 3,
+      "Bandwidth": 2000,
+      "LatencyMs": 20
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 3,
+      "DstNodeID": 0,
+      "Bandwidth": 1500,
+      "LatencyMs": 20
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 0,
+      "DstNodeID": 4,
+      "Bandwidth": 1500,
+      "LatencyMs": 6
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 4,
+      "DstNodeID": 0,
+      "Bandwidth": 1200,
+      "LatencyMs": 6
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 0,
+      "DstNodeID": 5,
+      "Bandwidth": 1200,
+      "LatencyMs": 10
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "active",
+      "SrcNodeID": 5,
+      "DstNodeID": 0,
+      "Bandwidth": 1000,
+      "LatencyMs": 10
+    },
+    {
+      "EdgeType": "Link",
+      "Status": "active",
+      "SrcNodeID": 0,
+      "DstNodeID": 6,
+      "Bandwidth": 3000,
+      "LatencyMs": 80
+    },
+    {
+      "EdgeType": "Link",
+      "Status": "active",
+      "SrcNodeID": 0,
+      "DstNodeID": 7,
+      "Bandwidth": 3000,
+      "LatencyMs": 120
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 0,
+      "DstNodeID": 8,
+      "Bandwidth": 1800,
+      "LatencyMs": 7,
+      "ActivationTimeSec": 60
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 8,
+      "DstNodeID": 0,
+      "Bandwidth": 1400,
+      "LatencyMs": 7,
+      "ActivationTimeSec": 60
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 0,
+      "DstNodeID": 9,
+      "Bandwidth": 2200,
+      "LatencyMs": 3,
+      "ActivationTimeSec": 45
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 9,
+      "DstNodeID": 0,
+      "Bandwidth": 1800,
+      "LatencyMs": 3,
+      "ActivationTimeSec": 45
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 0,
+      "DstNodeID": 10,
+      "Bandwidth": 1600,
+      "LatencyMs": 25,
+      "ActivationTimeSec": 90
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 10,
+      "DstNodeID": 0,
+      "Bandwidth": 1200,
+      "LatencyMs": 25,
+      "ActivationTimeSec": 90
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 0,
+      "DstNodeID": 11,
+      "Bandwidth": 1900,
+      "LatencyMs": 5,
+      "ActivationTimeSec": 50
+    },
+    {
+      "EdgeType": "SingleLink",
+      "Status": "inactive",
+      "SrcNodeID": 11,
+      "DstNodeID": 0,
+      "Bandwidth": 1500,
+      "LatencyMs": 5,
+      "ActivationTimeSec": 50
+    }
+  ],
+  "BaseLatencyType": "haversine",
+  "ScalingConstraints": {
+    "MaxActiveFogNodes": 8,
+    "MinActiveFogNodes": 3,
+    "ActivationCooldownSec": 300,
+    "DeactivationCooldownSec": 900,
+    "CostPerActivation": 5.0,
+    "MigrationOverheadFactor": 0.15
+  },
+  "NetworkDefaults": {
+    "PacketLoss": 0.001,
+    "CostPerGB": 0.05,
+    "EnergyCostPerKWh": 0.15
+  }
+}

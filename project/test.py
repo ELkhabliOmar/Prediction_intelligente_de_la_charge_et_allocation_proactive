@@ -38,6 +38,7 @@ except Exception:
     EDGE_SIM_AVAILABLE = False
 
 
+# Calcule des statistiques sur le workload par rapport à la durée de simulation (ticks) pour vérifier si les tâches tombent bien dans la fenêtre de temps.
 def _workload_window_stats(workload_idx: dict, ticks: int):
     """Retourne (nb_total, nb_in_window, min_ts, max_ts)."""
     all_ts = sorted(workload_idx.keys())
@@ -49,6 +50,12 @@ def _workload_window_stats(workload_idx: dict, ticks: int):
     return nb_total, nb_in_window, int(all_ts[0]), int(all_ts[-1])
 
 
+# --- Fonction Principale (Main) ---
+# 1. Configure les arguments et les graines aléatoires.
+# 2. Charge les modules (LSTM, Planner, Scheduler).
+# 3. Construit la topologie Fog/Cloud (Noeuds et Liens) à partir du JSON.
+# 4. Lance le simulateur EdgeSimPy avec l'algorithme proactif.
+# 5. Affiche et sauvegarde les résultats.
 def main():
     if not EDGE_SIM_AVAILABLE:
         print("❌ edge-sim-py n'est pas installé. pip install edge-sim-py")

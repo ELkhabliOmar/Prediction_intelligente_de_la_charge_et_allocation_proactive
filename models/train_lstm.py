@@ -49,6 +49,7 @@ MC_DROPOUT_SAMPLES = 30  # Nombre d'échantillons pour Monte Carlo Dropout
 # =========================
 # Fonctions de chargement et prétraitement
 # =========================
+# Charge le fichier CSV contenant les tâches et retourne une liste de dictionnaires.
 def load_workload(path: str) -> List[dict]:
     """Charge les données de workload"""
     rows = []
@@ -58,6 +59,7 @@ def load_workload(path: str) -> List[dict]:
             rows.append(_normalize_task_row(row))
     return rows
 
+# Convertit une ligne brute du CSV en un format standardisé (cpu_demand, timestamp, duration...).
 def _normalize_task_row(row: dict) -> dict:
     """Normalise une ligne de task"""
     # Format déjà normalisé
@@ -96,6 +98,7 @@ def heuristic_place_on(cpu_demand: int, threshold: int = 300) -> str:
     """Heuristique simple de placement"""
     return "Cloud" if cpu_demand > threshold else "Fog"
 
+# Génère des caractéristiques temporelles (heure du jour, jour de la semaine, tendance) à partir des timestamps.
 def extract_temporal_features(timestamps: List[int]) -> Dict[str, List[float]]:
     """Extrait des features temporelles pour améliorer les prédictions"""
     features = {
@@ -133,6 +136,8 @@ def extract_temporal_features(timestamps: List[int]) -> Dict[str, List[float]]:
     
     return features
 
+# Transforme la liste des tâches discrètes en une série temporelle continue de pression (charge CPU)
+# et génère les features associées pour l'entraînement.
 def build_enhanced_pressure_series(workload: List[dict], fog_cpu: int) -> Tuple[List[float], Dict[str, List[float]]]:
     """Construit une série de pression avec features temporelles"""
     if not workload:
@@ -207,6 +212,9 @@ def build_enhanced_pressure_series(workload: List[dict], fog_cpu: int) -> Tuple[
 # =========================
 # Modèle Bayesian LSTM amélioré
 # =========================
+# --- Classe BayesianLSTM ---
+# Modèle de réseau de neurones combinant LSTM, Attention et couches probabilistes.
+# Permet d'estimer non seulement la valeur future mais aussi l'incertitude (variance) via Monte Carlo Dropout.
 class BayesianLSTM(nn.Module):
     """LSTM avec prédictions probabilistes et estimation d'incertitude"""
     def __init__(self, input_dim=1, hidden_dim=256, num_layers=3, dropout=0.4):
@@ -263,6 +271,8 @@ class BayesianLSTM(nn.Module):
             elif 'bias' in name:
                 nn.init.zeros_(param)
     
+    # Passe avant (Forward pass). Si mc_samples > 1, effectue plusieurs passes avec Dropout activé
+    # pour estimer la moyenne et la variance (incertitude).
     def forward(self, x, return_uncertainty=False, mc_samples=1):
         """
         Forward pass avec option pour Monte Carlo Dropout
@@ -319,6 +329,7 @@ class BayesianLSTM(nn.Module):
             
             return mean
     
+    # Méthode utilitaire pour effectuer une prédiction robuste avec intervalle de confiance.
     def predict_with_uncertainty(self, x, n_samples=MC_DROPOUT_SAMPLES):
         """Prédiction avec estimation d'incertitude via Monte Carlo Dropout"""
         self.train()  # Important: garder dropout activé pour MC
@@ -374,6 +385,7 @@ class AleatoricEpistemicLoss(nn.Module):
 # =========================
 # Fonctions d'entraînement
 # =========================
+# Prépare les tenseurs X (séquences d'entrée) et y (cibles) à partir des séries temporelles.
 def create_enhanced_dataset(pressure_series: List[float], 
                            features_dict: Dict[str, List[float]], 
                            seq_len: int) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -406,6 +418,7 @@ def create_enhanced_dataset(pressure_series: List[float],
     
     return torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32).unsqueeze(-1)
 
+# Applique des transformations aléatoires (bruit, échelle, décalage) pour augmenter la robustesse du modèle.
 def augment_time_series(series: List[float], augmentation_factor: float = 0.1) -> List[float]:
     """Augmente les séries temporelles avec du bruit"""
     if len(series) < 10:
@@ -430,6 +443,7 @@ def augment_time_series(series: List[float], augmentation_factor: float = 0.1) -
     
     return augmented.tolist()
 
+# Découpe la série temporelle en fenêtres glissantes de taille `seq_len` pour l'entraînement supervisé.
 def make_windows_with_features(pressure_series: List[float], 
                               features_dict: Dict[str, List[float]],
                               seq_len: int, stride: int = 1,
@@ -477,6 +491,7 @@ def make_windows_with_features(pressure_series: List[float],
     y_t = torch.tensor(y, dtype=torch.float32).unsqueeze(-1)
     return X_t, y_t
 
+# Divise les données en ensembles d'entraînement, de validation et de test, et crée les DataLoaders PyTorch.
 def create_dataloaders(X: torch.Tensor, y: torch.Tensor, 
                       batch_size: int = 128,
                       val_ratio: float = 0.15,
@@ -502,6 +517,7 @@ def create_dataloaders(X: torch.Tensor, y: torch.Tensor,
     
     return train_loader, val_loader, test_loader
 
+# Exécute une époque d'entraînement : passe avant, calcul de la perte, rétropropagation et mise à jour des poids.
 def train_epoch(model, dataloader, optimizer, criterion, device, gradient_clip: float = 1.0):
     """Entraîne le modèle pour une epoch"""
     model.train()
@@ -533,6 +549,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, gradient_clip: 
     
     return total_loss / max(1, total_samples)
 
+# Évalue le modèle sur un ensemble de validation en calculant la perte, l'erreur absolue moyenne (MAE) et l'incertitude.
 def validate_epoch(model, dataloader, criterion, device, mc_samples: int = 10):
     """Valide le modèle avec estimation d'incertitude"""
     model.eval()
@@ -566,6 +583,7 @@ def validate_epoch(model, dataloader, criterion, device, mc_samples: int = 10):
 # =========================
 # Fonction principale - CORRIGÉE
 # =========================
+# Point d'entrée du script : gère les arguments, charge les données, initialise le modèle, lance la boucle d'entraînement et sauvegarde le résultat.
 def main():
     parser = argparse.ArgumentParser(description="Entraînement LSTM bayésien amélioré")
     parser.add_argument("--data", default=DATA_PATH_DEFAULT)

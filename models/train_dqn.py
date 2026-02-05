@@ -20,6 +20,8 @@ import torch.nn as nn
 import numpy as np
 
 
+# --- Classe DQN ---
+# Réseau de neurones simple (Fully Connected) qui estime la Q-value (récompense future) pour chaque action possible.
 class DQN(nn.Module):
     """
     input: 5 features
@@ -42,6 +44,7 @@ class DQN(nn.Module):
         return self.net(x)
 
 
+# Fixe les graines aléatoires pour assurer la reproductibilité des entraînements.
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -86,6 +89,12 @@ def _normalize_task_row(row: Dict) -> Dict:
     }
 
 
+# --- Fonction Principale (Main) ---
+# Orchestre l'entraînement de l'agent DQN :
+# 1. Initialise l'environnement simulé et les réseaux (Policy & Target).
+# 2. Boucle sur les étapes (steps) pour générer des expériences (State, Action, Reward, Next State).
+# 3. Stocke les expériences dans le Replay Buffer.
+# 4. Entraîne le réseau sur des batchs aléatoires du buffer.
 def main():
     ap = argparse.ArgumentParser(description="Entraînement DQN Fog/Cloud (compatible test.py)")
     ap.add_argument("--data", default=DEFAULT_TRAINSET, help="CSV dataset (trainset/testset Tuple30K)")
@@ -155,6 +164,7 @@ def main():
         "cloud_decisions": 0,
     }
 
+    # Construit le vecteur d'état normalisé (Tensor) à partir des valeurs brutes de l'environnement.
     def make_state(cpu: float, ram: float, pressure_val: float, fog_cpu: float, offload_ratio: float):
         cpu_norm = min(cpu / 500.0, 2.0)
         ram_norm = min(ram / 4096.0, 2.0)
