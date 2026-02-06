@@ -1,4 +1,44 @@
 # train_dqn.py - ENTRAINEMENT DQN (COMPATIBLE TEST.PY + CHECKPOINT ENRICHI)
+
+"""
+ENTRAÎNEMENT D'UN AGENT DQN POUR L'ORCHESTRATION FOG/CLOUD
+================================================================================
+
+DESCRIPTION:
+------------
+Ce script implémente un agent Deep Q-Network (DQN) pour apprendre des politiques
+de décision optimales entre le placement des tâches sur le Fog ou le Cloud.
+Le système est conçu pour fonctionner avec le simulateur d'orchestration de tâches
+et est compatible avec le script test.py pour l'évaluation.
+
+FONCTIONNEMENT PRINCIPAL:
+-------------------------
+1. Charge un dataset de tâches (CPU, RAM, durée, timestamp)
+2. Simule un environnement où l'agent doit choisir entre:
+   - Action 0: Placer la tâche sur le Fog (latence faible, capacité limitée)
+   - Action 1: Placer la tâche sur le Cloud (latence élevée, capacité illimitée)
+
+3- Utilise l'apprentissage par renforcement avec:   # Le programme apprend par essais et erreurs, comme un bébé qui apprend à marcher
+
+   - Exploration ε-greedy                        # Au début, il essaie plein de choses au hasard, puis de moins en moins
+   - Replay Buffer d'expériences                # Il garde un journal de toutes ses expériences pour les relire
+   - Double Q-learning avec réseau cible        # Il a un "professeur" qui vérifie son travail et le corrige
+
+
+4. Optimise une récompense qui pénalise:
+   - La surcharge du Fog (>100% de capacité)
+   - Les coûts Cloud
+   - Les latences élevées
+
+
+UTILISATION:
+------------
+python train_dqn.py --data dataset.csv --fog_cpu 100 --steps 20000 --batch 128
+
+
+
+================================================================================
+"""
 import os
 import csv
 import random
