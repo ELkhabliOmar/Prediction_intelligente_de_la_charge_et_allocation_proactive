@@ -74,6 +74,8 @@ GLOBAL_IMAGE = build_global_image_no_layers()
 # --- Classe BayesianLSTM (Mise à jour pour compatibilité train_lstm.py) ---
 # Modèle probabiliste avec Attention et Incertitude (Monte Carlo Dropout)
 class BayesianLSTM(nn.Module):
+    # Initialise l'architecture du réseau LSTM Bayésien.
+    # Objectif : Créer les couches (LSTM, Attention, Têtes de sortie) pour prédire la charge et l'incertitude.
     def __init__(self, input_dim=1, hidden_dim=256, num_layers=3, dropout=0.4):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -114,6 +116,8 @@ class BayesianLSTM(nn.Module):
             nn.Softplus()
         )
 
+    # Effectue la passe avant (forward pass) du réseau.
+    # Objectif : Calculer la prédiction moyenne en appliquant le mécanisme d'attention et le dropout (pour l'incertitude).
     def forward(self, x, return_uncertainty=False, mc_samples=1):
         lstm_out, _ = self.lstm(x)
         
@@ -132,6 +136,8 @@ class BayesianLSTM(nn.Module):
 # Réseau de neurones profond (Deep Q-Network) pour l'apprentissage par renforcement.
 # Prend l'état du système en entrée et retourne les Q-values pour chaque action (Fog ou Cloud).
 class DQN(nn.Module):
+    # Initialise le réseau de neurones entièrement connecté.
+    # Objectif : Définir la structure du réseau qui prendra l'état en entrée et sortira les Q-values.
     def __init__(self, input_dim=5, output_dim=2, hidden_dim=128, dropout=0.1):
         super().__init__()
         self.net = nn.Sequential(
@@ -142,6 +148,9 @@ class DQN(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, output_dim),
         )
+    
+    # Effectue la passe avant pour estimer les Q-values.
+    # Objectif : Retourner un score pour chaque action possible (Fog vs Cloud) donné un état.
     def forward(self, x): return self.net(x)
 
 # =========================================================
@@ -151,6 +160,8 @@ class DQN(nn.Module):
 # Responsable de charger le modèle LSTM et de fournir des prédictions de charge future.
 # Gère également un mécanisme de "fallback" (secours) si le modèle n'est pas disponible ou si l'historique est insuffisant.
 class Module1_LSTMPredictor:
+    # Initialise le prédicteur et charge le modèle pré-entraîné.
+    # Objectif : Préparer le modèle LSTM pour l'inférence en chargeant les poids et la configuration.
     def __init__(self, model_path: str, horizons=None, device="cpu"):
         self.horizons = horizons or [5, 15, 30, 60]
         self.seq_len = 30
@@ -203,6 +214,7 @@ class Module1_LSTMPredictor:
             print(f"[Module1] ⚠️ modèle LSTM introuvable: {model_path} -> fallback")
 
     # Calcule l'écart-type glissant pour estimer la volatilité récente de la charge.
+    # Objectif : Mesurer à quel point la charge varie récemment pour ajuster l'incertitude.
     @staticmethod
     def _rolling_std(values: List[float]) -> float:
         if len(values) < 2:
@@ -213,6 +225,7 @@ class Module1_LSTMPredictor:
     # --- Méthode predict ---
     # Prend l'historique de pression (deque), prépare les données pour le LSTM,
     # exécute l'inférence et retourne la prédiction avec une estimation de l'incertitude.
+    # Objectif : Fournir une prédiction de charge future pour plusieurs horizons temporels (ex: +5, +15 ticks).
     def predict(self, pressure_history: deque) -> Dict[int, Dict[str, float]]:
         hist_all = list(pressure_history)
         if len(hist_all) < 3:
@@ -292,6 +305,8 @@ class Module2_HVWPO_Planner:
     Module 2: H-VWPO (Horizontal-Vertical Workload Prediction & Offloading).
     VERSION: Scale Up Horizontal Only, Scale Down Actif
     """
+    # Initialise le planificateur avec les seuils et paramètres de scaling.
+    # Objectif : Configurer les règles de décision (seuils d'utilisation, délais de refroidissement, etc.).
     def __init__(self, target_util=0.70, min_fog_cpu=30, ema_alpha=0.25, 
                  cooldown_windows=2, max_scale_mult=4.0, down_threshold=0.30):
         print(f"[Module2] ✅ H-VWPO Planner initialisé (Horizontal Only)")
@@ -318,6 +333,7 @@ class Module2_HVWPO_Planner:
     # --- Méthode plan ---
     # Cœur de la logique de décision proactive.
     # Compare la charge prédite (robuste) aux seuils pour décider 'up', 'down' ou 'none', et calcule le ratio d'offloading.
+    # Objectif : Générer un plan d'action (Scaling + Offloading) pour maintenir le système dans un état optimal.
     def plan(self, predictions, total_fog_capacity, total_incoming_demand, current_pressure, 
              current_t, W_window, worst_pressure=0.0, active_nodes_count=1):
         
@@ -430,6 +446,8 @@ class Module2_HVWPO_Planner:
 # Responsable du placement tâche par tâche.
 # Utilise soit une heuristique (baseline), soit le modèle DQN entraîné pour choisir entre Fog et Cloud.
 class Module3_Scheduler:
+    # Initialise l'ordonnanceur et charge l'agent DQN.
+    # Objectif : Préparer l'agent intelligent pour la prise de décision temps réel.
     def __init__(self, dqn_path: str = None, cpu_threshold_cloud=300, warmup_ticks=15):
         self.cpu_threshold_cloud = int(cpu_threshold_cloud)
         self.warmup_ticks = int(warmup_ticks)
@@ -458,6 +476,7 @@ class Module3_Scheduler:
 
     # Stratégie de base (heuristique) utilisée quand le DQN n'est pas prêt ou échoue.
     # Envoie au Cloud si la tâche est grosse ou si la pression est critique.
+    # Objectif : Assurer une décision de repli fiable si l'IA n'est pas disponible.
     def baseline(self, task_cpu: int, offload_ratio: float, pressure: float) -> str:
         if pressure < 0.40:
             offload_ratio = 0.0
@@ -472,6 +491,7 @@ class Module3_Scheduler:
     # --- Méthode decide ---
     # Prend les caractéristiques de la tâche et l'état du système.
     # Interroge le réseau DQN pour obtenir l'action optimale (0=Fog, 1=Cloud).
+    # Objectif : Choisir le meilleur placement pour une tâche spécifique afin d'optimiser la QoS et les coûts.
     def decide(self, task_cpu: int, task_ram: int, pressure: float, fog_cpu: int, offload_ratio: float, t: int):
         if pressure >= 0.95:
             return "Cloud", False
@@ -505,6 +525,7 @@ class Module3_Scheduler:
 # Workload helpers - INCHANGÉS
 # =========================================================
 # Charge le fichier CSV de workload et l'indexe par timestamp pour un accès rapide pendant la simulation.
+# Objectif : Organiser les tâches par temps d'arrivée pour une simulation efficace tick par tick.
 def load_workload_indexed(path: str) -> DefaultDict[int, List[dict]]:
     idx = defaultdict(list)
     with open(path, "r", newline="", encoding="utf-8") as f:
@@ -515,6 +536,7 @@ def load_workload_indexed(path: str) -> DefaultDict[int, List[dict]]:
     return idx
 
 # Normalise une ligne du CSV (gère différents formats de colonnes) pour avoir un dictionnaire standardisé.
+# Objectif : Convertir les données brutes du CSV en un format de tâche uniforme utilisable par le simulateur.
 def _normalize_task_row(row: Dict[str, Any]) -> Dict[str, Any]:
     if "task_id" in row and "timestamp" in row:
         return {
@@ -550,14 +572,18 @@ def _normalize_task_row(row: Dict[str, Any]) -> Dict[str, Any]:
 # Multi-node helpers - INCHANGÉS
 # =========================================================
 # Calcule la somme des demandes CPU des services actifs sur un serveur donné.
+# Objectif : Connaître la charge actuelle absolue (en unités CPU) d'un serveur.
 def active_cpu_on_server(active_services: List[Service], server: EdgeServer) -> int:
     return int(sum(s.cpu_demand for s in active_services if getattr(s, "placed_on_server", None) == server))
 
 # Calcule le ratio d'utilisation (pression) d'un serveur spécifique.
+# Objectif : Obtenir le pourcentage d'utilisation d'un serveur (0.0 à 1.0+).
 def pressure_server(active_services: List[Service], server: EdgeServer) -> float:
     cpu = active_cpu_on_server(active_services, server)
     return float(cpu) / max(1.0, float(server.cpu))
 
+# Sélectionne le nœud Fog le plus approprié pour une nouvelle tâche (celui avec la pression projetée la plus basse).
+# Objectif : Répartir la charge intelligemment entre les nœuds Fog actifs (Load Balancing).
 def pick_best_fog(fogs: List[EdgeServer], active_services: List[Service], task_cpu: int = 0) -> Tuple[EdgeServer, float]:
     active_fogs = [f for f in fogs if getattr(f, "status", "active") == "active"]
     if not active_fogs:
@@ -577,6 +603,8 @@ def pick_best_fog(fogs: List[EdgeServer], active_services: List[Service], task_c
             best, best_p = f, p
     return best, best_p
 
+# Trouve le nœud Fog actif le plus chargé.
+# Objectif : Identifier les goulots d'étranglement ou les candidats au délestage.
 def pick_most_loaded_active_fog(fogs: List[EdgeServer], active_services: List[Service]) -> Tuple[EdgeServer, float]:
     active_fogs = [f for f in fogs if getattr(f, "status", "active") == "active"]
     if not active_fogs: return fogs[0], 0.0
@@ -589,6 +617,8 @@ def pick_most_loaded_active_fog(fogs: List[EdgeServer], active_services: List[Se
             worst, worst_p = f, p
     return worst, worst_p
 
+# Alias pour pick_best_fog.
+# Objectif : Trouver le nœud le moins chargé.
 def pick_least_loaded_active_fog(fogs: List[EdgeServer], active_services: List[Service]) -> Tuple[EdgeServer, float]:
     return pick_best_fog(fogs, active_services, task_cpu=0)
 
@@ -597,6 +627,7 @@ def pick_least_loaded_active_fog(fogs: List[EdgeServer], active_services: List[S
 # =========================================================
 # Tente de réduire la capacité CPU d'un nœud (Scaling Vertical Down) pour économiser de l'énergie
 # si la charge actuelle le permet.
+# Objectif : Ajuster dynamiquement la capacité d'un nœud à la baisse pour réduire la consommation énergétique sans impacter les services.
 def _vertical_downscale(fog_node, active_services, min_fog_cpu=30):
     """
     ✅ Vertical downscale uniquement (pas de up)
@@ -643,6 +674,8 @@ TOTAL_SCALE_UP = 0
 TOTAL_SCALE_DOWN = 0
 TOTAL_ENERGY_JOULES = 0.0
 
+# Initialise l'état global de la simulation.
+# Objectif : Réinitialiser toutes les variables globales avant de lancer une nouvelle simulation.
 def setup_state(workload_idx, module1, module2, module3, W: int, **kwargs):
     global WORKLOAD_IDX, MODULE1, MODULE2, MODULE3, W_WINDOW, TOTAL_SCALE_UP, TOTAL_SCALE_DOWN, TOTAL_ENERGY_JOULES
     WORKLOAD_IDX = workload_idx
@@ -654,6 +687,8 @@ def setup_state(workload_idx, module1, module2, module3, W: int, **kwargs):
     TOTAL_SCALE_DOWN = 0
     TOTAL_ENERGY_JOULES = 0.0
 
+# Récupère les métriques collectées pendant la simulation.
+# Objectif : Exporter les données de performance pour l'analyse et les graphiques.
 def get_metrics():
     return SIMULATION_METRICS
 
@@ -663,6 +698,7 @@ def get_metrics():
 # --- Algorithme Principal (Boucle de Simulation) ---
 # Cette fonction est appelée à chaque "tick" par le simulateur.
 # Elle orchestre : Fin des tâches, Arrivée des tâches, Placement (Module 3), Monitoring, et Planification périodique (Module 1 & 2).
+# Objectif : Exécuter un pas de temps de la simulation en intégrant toute la logique MAPE (Monitor, Analyze, Plan, Execute).
 def proactive_placement_algorithm(parameters):
     global CURRENT_T, ACTIVE_SERVICES, PRESSURE_HISTORY, PREDICTIONS, PLAN, SIMULATION_METRICS, CLOUD_RR, TOTAL_SCALE_UP, TOTAL_SCALE_DOWN, TOTAL_ENERGY_JOULES
 
