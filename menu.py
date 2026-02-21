@@ -453,7 +453,7 @@ def train_dqn():
     print(f"📊 Dataset d'entraînement: {Path(DEFAULT_TRAINSET).name}")
     
     # Paramètres - SUPPRIMER lr ici
-    fog_cpu = ask_int("Fog CPU", 100)
+    fog_cpu = ask_int("Fog CPU", 4000) # ✅ Corrigé: 4000 suffit pour saturer avec des tâches de ~500
     steps = ask_int("Steps", 20000)
     batch = ask_int("Batch size", 128)
     hidden = ask_int("Hidden dim", 128)

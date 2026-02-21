@@ -189,12 +189,11 @@ def main():
     # état interne "pression" (env simplifié)
     pressure = 0.0
     DECAY = 0.95
-
-    # Coûts (équilibrés)
-    LAMBDA_OVER = 5.0
-    LAMBDA_CLOUD = 0.03
-    LAMBDA_FOG = 0.002
-    LAMBDA_LATENCY = 0.01
+################################################################################################################################################################
+    # ✅ POIDS DÉCISIONNELS (User Request: 80% Sat, 10% Energy, 10% Latency)
+    W_SAT = 0.80
+    W_NRJ = 0.10 # Energie
+    W_LAT = 0.10 # Latence
 
     stats = {
         "rewards": [],
@@ -248,22 +247,34 @@ def main():
 
         if a == 0:  # Fog
             pressure_next += (cpu / max(args.fog_cpu, 1.0)) * min(1.0, dur / 10.0)
-            latency_cost = LAMBDA_LATENCY * 0.1
-            cloud_cost = 0.0
-            fog_cost = LAMBDA_FOG * (cpu / 100.0)
+            
+            # Coûts normalisés pour le Fog
+            # 1. Saturation: Pression résultante (si > 1.0, pénalité forte)
+            norm_sat = pressure_next if pressure_next <= 1.0 else (pressure_next ** 2)
+            # 2. Énergie: Consommation locale (proportionnelle à la tâche)
+            norm_nrj = min(1.0, cpu / 200.0)
+            # 3. Latence: Faible sur le Fog
+            norm_lat = 0.1
+            
         else:  # Cloud
-            latency_cost = LAMBDA_LATENCY * 1.0
-            cloud_cost = LAMBDA_CLOUD * (cpu / 100.0)
-            fog_cost = 0.0
+            # Coûts normalisés pour le Cloud
+            # 1. Saturation: Nulle sur le Fog (le Cloud soulage)
+            norm_sat = 0.0
+            # 2. Énergie: Faible (transmission uniquement)
+            norm_nrj = 0.05
+            # 3. Latence: Élevée sur le Cloud
+            norm_lat = 1.0
 
-        overload = max(0.0, pressure_next - 1.0)
-        reward = - (LAMBDA_OVER * overload) - cloud_cost - fog_cost - latency_cost
+        # Calcul de la pénalité pondérée (FAHP/TOPSIS logic integrated in Reward)
+        penalty = (W_SAT * norm_sat) + (W_NRJ * norm_nrj) + (W_LAT * norm_lat)
+        
+        # Reward est l'opposé de la pénalité (on veut maximiser le reward)
+        # Facteur 10 pour amplifier les gradients
+        reward = - (penalty * 10.0)
 
-        # petits bonus
-        if a == 0 and overload < 0.2:
-            reward += 0.1
-        elif a == 1 and pressure > 0.8:
-            reward += 0.05
+        # Bonus de guidage: Encourager Fog si non saturé
+        if a == 0 and pressure_next < 0.85:
+            reward += 2.0
 
         stats["rewards"].append(reward)
         stats["pressures"].append(pressure_next)

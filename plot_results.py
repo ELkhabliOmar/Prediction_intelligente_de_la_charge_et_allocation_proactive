@@ -33,7 +33,7 @@ def plot_simulation_results(csv_path: str, output_path: str):
     fig = plt.figure(figsize=(20, 28))
     
     # Définition des grilles
-    gs = fig.add_gridspec(7, 2, height_ratios=[3, 3, 2, 2, 1.5, 1.5, 1.5], hspace=0.4)
+    gs = fig.add_gridspec(9, 2, height_ratios=[3, 3, 2, 3, 3, 3, 0, 3, 3], hspace=0.5)
     
     ax1 = fig.add_subplot(gs[0, :])
     ax2 = fig.add_subplot(gs[1, :])
@@ -42,7 +42,9 @@ def plot_simulation_results(csv_path: str, output_path: str):
     ax5 = fig.add_subplot(gs[4, 0])  # Métriques gauche
     ax6 = fig.add_subplot(gs[4, 1])  # Métriques droite
     ax7 = fig.add_subplot(gs[5, :])  # Prédictions vs Réalité
-    ax8 = fig.add_subplot(gs[6, :])  # Heatmap décisions
+  #  ax8 = fig.add_subplot(gs[6, :])  # Heatmap décisions
+    ax9 = fig.add_subplot(gs[7, :])  # ✅ Heatmap Utilisation Fog par Nœud
+    ax10 = fig.add_subplot(gs[8, :]) # ✅ Stats Énergie & Cloud
 
     # Titre principal
     workload_name = os.path.basename(csv_path).replace('.csv', '').replace('results_', '')
@@ -58,8 +60,8 @@ def plot_simulation_results(csv_path: str, output_path: str):
     # --- 3. Offloading et Décisions ---
     plot_offloading_decisions(ax3, df, metrics)
     
-    # --- 4. Répartition des Tâches ---
-    plot_task_distribution(ax4, df)
+    # --- 4. Distribution de la Pression (Histogramme) ---
+    plot_pressure_histogram(ax4, df)
     
     # --- 5. Métriques de Performance (Gauche) ---
     plot_performance_metrics_left(ax5, metrics)
@@ -71,7 +73,13 @@ def plot_simulation_results(csv_path: str, output_path: str):
     plot_prediction_errors(ax7, df, metrics)
     
     # --- 8. Heatmap des Décisions ---
-    plot_decision_heatmap(ax8, df)
+    #plot_decision_heatmap(ax8, df)
+
+    # --- 9. Heatmap Utilisation par Nœud Fog ---
+    plot_fog_nodes_heatmap(ax9, df)
+
+    # --- 10. Énergie et Cloud par Nœud ---
+    plot_energy_and_cloud_stats(ax10, df)
     
     # --- Finalisation ---
     plt.tight_layout(rect=[0, 0.02, 1, 0.96])
@@ -244,23 +252,39 @@ def plot_offloading_decisions(ax, df, metrics):
     ax.set_ylim(-0.05, 1.05)
 
 
-def plot_task_distribution(ax, df):
-    """Graphique répartition des tâches."""
-    # Stack plot
-    ax.stackplot(df['t'], df['tasks_on_fog'], df['tasks_on_cloud'],
-                labels=['Tâches Fog', 'Tâches Cloud'],
-                colors=['#1f77b4', '#ff7f0e'], alpha=0.8)
+def plot_pressure_histogram(ax, df):
+    """
+    Affiche l'histogramme de la pression pour analyser la stabilité.
+    Remplace l'ancien graphique de répartition des tâches.
+    """
+    # On filtre les données pour éviter le bruit du démarrage (pression > 0.01)
+    data = df[df['pressure'] > 0.01]['pressure']
     
-    # Ligne de capacité Fog (approximative)
-    ax.plot(df['t'], df['tasks_on_fog'] + df['tasks_on_cloud'],
-           label='Total Tâches', color='black', linestyle=':', linewidth=1)
+    if len(data) == 0:
+        ax.text(0.5, 0.5, "Pas assez de données de pression", ha='center', va='center')
+        return
+
+    # Histogramme
+    # density=True pour avoir une densité de probabilité comparable
+    ax.hist(data, bins=30, color='skyblue', edgecolor='black', alpha=0.7, density=True, label='Fréquence')
     
-    ax.set_xlabel("Temps (ticks)", fontsize=12)
-    ax.set_ylabel("Nombre de Tâches Actives", fontsize=12)
-    ax.set_title("④ RÉPARTITION DES TÂCHES ACTIVES", fontsize=14, fontweight='bold', pad=10)
-    ax.legend(loc='upper right')
+    # Lignes verticales (Cible et Surcharge)
+    ax.axvline(x=0.7, color='green', linestyle='--', linewidth=2, label='Cible (0.7)')
+    ax.axvline(x=1.0, color='red', linestyle='--', linewidth=2, label='Surcharge (1.0)')
+
+    # Zones de couleur en arrière-plan pour l'interprétation
+    # Gris: Sous-utilisation / Vert: Zone Optimale / Rouge: Surcharge
+    ylim = ax.get_ylim()
+    ax.axvspan(0, 0.4, color='gray', alpha=0.1) 
+    ax.axvspan(0.4, 0.9, color='green', alpha=0.05)
+    ax.axvspan(1.0, max(2.0, data.max()), color='red', alpha=0.05)
+
+    ax.set_xlabel("Pression (Charge / Capacité)", fontsize=10)
+    ax.set_ylabel("Densité de probabilité", fontsize=10)
+    ax.set_title("④ DISTRIBUTION DE LA PRESSION (STABILITÉ)", fontsize=12, fontweight='bold', pad=10)
+    ax.legend(loc='upper right', fontsize=9)
     ax.grid(True, alpha=0.3)
-    ax.set_ylim(bottom=0)
+    ax.set_xlim(0, max(1.2, data.max() + 0.1))
 
 
 def plot_performance_metrics_left(ax, metrics):
@@ -315,7 +339,7 @@ def plot_prediction_errors(ax, df, metrics):
     df['pressure_bin'] = pd.cut(df['pressure'], bins=[0, 0.3, 0.7, 1.0, 2.0, 5.0])
     
     if df['pressure_bin'].notna().any():
-        error_by_bin = df.groupby('pressure_bin')['pred_error'].agg(['mean', 'std', 'count'])
+        error_by_bin = df.groupby('pressure_bin', observed=False)['pred_error'].agg(['mean', 'std', 'count'])
         
         x_pos = np.arange(len(error_by_bin))
         ax.bar(x_pos, error_by_bin['mean'], yerr=error_by_bin['std'],
@@ -373,6 +397,80 @@ def plot_decision_heatmap(ax, df):
     
     ax.set_title("⑧ HEATMAP DES DÉCISIONS DANS LE TEMPS", fontsize=12, fontweight='bold', pad=10)
 
+
+def plot_fog_nodes_heatmap(ax, df):
+    """Heatmap de la pression par nœud Fog individuel."""
+    # Identifier les colonnes de pression des nœuds fog (format: fog_Nom_p)
+    fog_cols = [c for c in df.columns if c.startswith('fog_') and c.endswith('_p')]
+    
+    if not fog_cols:
+        ax.text(0.5, 0.5, "Pas de données détaillées par nœud", ha='center', va='center')
+        return
+
+    # Extraire les données et transposer pour avoir (Nœuds x Temps)
+    # On nettoie les noms pour l'affichage
+    labels = [c.replace('fog_', '').replace('_p', '') for c in fog_cols]
+    data = df[fog_cols].T.values # (N_nodes, T)
+    
+    # Création du heatmap
+    im = ax.imshow(data, aspect='auto', cmap='plasma', vmin=0, vmax=1.2, interpolation='nearest')
+    
+    # Configuration des axes
+    ax.set_yticks(np.arange(len(labels)))
+    ax.set_yticklabels(labels, fontsize=9)
+    ax.set_xlabel("Temps (ticks)", fontsize=10)
+    ax.set_title("⑨ UTILISATION DÉTAILLÉE PAR NŒUD FOG (Heatmap)", fontsize=12, fontweight='bold', pad=10)
+    
+    # Barre de couleur
+    cbar = plt.colorbar(im, ax=ax, orientation='vertical', pad=0.01)
+    cbar.set_label("Pression (0-1+)", fontsize=9)
+
+
+def plot_energy_and_cloud_stats(ax, df):
+    """Graphique combiné : Énergie par Fog et Charge par Cloud."""
+    # Préparation des données Énergie
+    power_cols = [c for c in df.columns if c.startswith('fog_') and c.endswith('_power')]
+    energy_sums = []
+    fog_labels = []
+    
+    if power_cols:
+        # Somme de la puissance sur le temps = Énergie totale (si tick=1s)
+        energy_sums = df[power_cols].sum().values
+        fog_labels = [c.replace('fog_', '').replace('_power', '') for c in power_cols]
+
+    # Préparation des données Cloud
+    cloud_cols = [c for c in df.columns if c.startswith('cloud_') and c.endswith('_load')]
+    cloud_sums = []
+    cloud_labels = []
+    
+    if cloud_cols:
+        # Moyenne de la charge
+        cloud_sums = df[cloud_cols].mean().values
+        cloud_labels = [c.replace('cloud_', '').replace('_load', '') for c in cloud_cols]
+
+    # Création de deux sous-graphiques côte à côte
+    ax.axis('off')
+    
+    # Sous-plot 1: Énergie Fog
+    if len(energy_sums) > 0:
+        ax1 = ax.inset_axes([0, 0, 0.48, 1])
+        # Utilisation de positions numériques pour éviter ConversionError
+        x_pos = range(len(fog_labels))
+        bars = ax1.bar(x_pos, energy_sums, color='orange', alpha=0.7, edgecolor='darkorange')
+        ax1.set_xticks(x_pos)
+        ax1.set_xticklabels(fog_labels, rotation=45, ha='right', fontsize=8)
+        ax1.set_title("Consommation Énergétique Totale par Nœud Fog (Joules)", fontsize=10, fontweight='bold')
+        ax1.grid(axis='y', alpha=0.3)
+
+    # Sous-plot 2: Charge Cloud
+    if len(cloud_sums) > 0:
+        ax2 = ax.inset_axes([0.52, 0, 0.48, 1])
+        x_pos2 = range(len(cloud_labels))
+        bars2 = ax2.bar(x_pos2, cloud_sums, color='skyblue', alpha=0.7, edgecolor='blue')
+        ax2.set_xticks(x_pos2)
+        ax2.set_xticklabels(cloud_labels, rotation=45, ha='right', fontsize=8)
+        ax2.set_title("Charge Moyenne par Nœud Cloud (CPU)", fontsize=10, fontweight='bold')
+        ax2.grid(axis='y', alpha=0.3)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

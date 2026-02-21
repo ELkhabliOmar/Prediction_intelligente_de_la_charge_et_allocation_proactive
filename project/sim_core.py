@@ -585,23 +585,44 @@ def pressure_server(active_services: List[Service], server: EdgeServer) -> float
 # Sélectionne le nœud Fog le plus approprié pour une nouvelle tâche (celui avec la pression projetée la plus basse).
 # Objectif : Répartir la charge intelligemment entre les nœuds Fog actifs (Load Balancing).
 def pick_best_fog(fogs: List[EdgeServer], active_services: List[Service], task_cpu: int = 0) -> Tuple[EdgeServer, float]:
+    """
+    Sélectionne le meilleur nœud Fog via une approche multicritère (FAHP/TOPSIS simplifié).
+    Critères: Saturation (80%), Énergie (10%), Latence (10%).
+    """
     active_fogs = [f for f in fogs if getattr(f, "status", "active") == "active"]
     if not active_fogs:
         return fogs[0], 10.0
 
-    best = active_fogs[0]
-    
-    def get_projected_pressure(srv):
-        current_load = active_cpu_on_server(active_services, srv)
-        return (current_load + task_cpu) / max(1.0, float(srv.cpu))
+    # Poids décisionnels
+    W_SAT = 0.80  # Saturation (80%)
+    W_NRJ = 0.10  # Énergie (10%)
+    W_LAT = 0.10  # Latence (10%)
 
-    best_p = get_projected_pressure(best)
+    best_node = active_fogs[0]
+    best_score = float('inf')
+    best_pressure_val = 1.0
 
-    for f in active_fogs[1:]:
-        p = get_projected_pressure(f)
-        if p < best_p:
-            best, best_p = f, p
-    return best, best_p
+    for f in active_fogs:
+        # 1. Saturation (Projected)
+        current_load = active_cpu_on_server(active_services, f)
+        proj_pressure = (current_load + task_cpu) / max(1.0, float(f.cpu))
+        norm_sat = proj_pressure if proj_pressure < 1.0 else (proj_pressure * 2.0) # Pénalité surcharge
+
+        # 2. Énergie (Approximation: plus chargé = plus d'énergie)
+        norm_nrj = min(1.0, proj_pressure)
+
+        # 3. Latence (Simplifié: supposée uniforme intra-fog ou basée sur coordonnées si dispo)
+        norm_lat = 0.1
+
+        # Score pondéré (à minimiser)
+        score = (W_SAT * norm_sat) + (W_NRJ * norm_nrj) + (W_LAT * norm_lat)
+
+        if score < best_score:
+            best_score = score
+            best_node = f
+            best_pressure_val = proj_pressure
+
+    return best_node, best_pressure_val
 
 # Trouve le nœud Fog actif le plus chargé.
 # Objectif : Identifier les goulots d'étranglement ou les candidats au délestage.
@@ -807,11 +828,32 @@ def proactive_placement_algorithm(parameters):
     P_IDLE = 100.0
     P_MAX = 250.0
     energy_tick = 0.0
-    for f in active_fogs_list:
+    
+    # ✅ Collecte des stats par nœud (Fog)
+    per_node_stats = {}
+    
+    for f in fogs: # On itère sur TOUS les fogs (actifs et inactifs) pour avoir des colonnes CSV stables
         util = pressure_server(ACTIVE_SERVICES, f)
-        power = P_IDLE + (P_MAX - P_IDLE) * min(1.0, util)
-        energy_tick += power
+        load = active_cpu_on_server(ACTIVE_SERVICES, f)
+        is_active = (getattr(f, "status", "active") == "active")
+        
+        power = 0.0
+        if is_active:
+            power = P_IDLE + (P_MAX - P_IDLE) * min(1.0, util)
+            energy_tick += power
+            
+        safe_name = getattr(f, "name", "Unknown").replace("-", "_").replace(" ", "")
+        per_node_stats[f"fog_{safe_name}_p"] = util
+        per_node_stats[f"fog_{safe_name}_load"] = load
+        per_node_stats[f"fog_{safe_name}_power"] = power
+
     TOTAL_ENERGY_JOULES += energy_tick
+
+    # ✅ Collecte des stats par nœud (Cloud)
+    for c in clouds:
+        safe_name = getattr(c, "name", "Unknown").replace("-", "_").replace(" ", "")
+        load = active_cpu_on_server(ACTIVE_SERVICES, c)
+        per_node_stats[f"cloud_{safe_name}_load"] = load
 
     # ✅ 4) MAPE/Plan toutes W ticks
     if CURRENT_T > 0 and (CURRENT_T % W_WINDOW == 0):
@@ -911,7 +953,7 @@ def proactive_placement_algorithm(parameters):
 
     # Metrics
     pred_h5 = PREDICTIONS.get(5, {})
-    SIMULATION_METRICS.append({
+    metric_row = {
         "t": int(CURRENT_T),
         "active_cpu_fog": int(total_active_cpu_fog),
         "fog_capacity": int(total_fog_capacity),
@@ -933,6 +975,10 @@ def proactive_placement_algorithm(parameters):
         "scale_up_total": int(TOTAL_SCALE_UP),
         "scale_down_total": int(TOTAL_SCALE_DOWN),
         "energy_joules_cumul": float(TOTAL_ENERGY_JOULES),
-    })
+    }
+    
+    # Fusionner avec les stats par nœud
+    metric_row.update(per_node_stats)
+    SIMULATION_METRICS.append(metric_row)
 
     CURRENT_T += 1
