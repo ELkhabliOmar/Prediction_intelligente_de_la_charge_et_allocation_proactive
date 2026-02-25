@@ -125,7 +125,6 @@ def run_scenario(name, args, workload_idx, topo_data, strategy="proactive"):
         nodes_map[node_data["NodeId"]] = server
 
     # Algorithme
-    import project.sim_core as sim_core
     simulator.stopping_criterion = lambda sim: (sim_core.CURRENT_T >= int(args.ticks))
     simulator.resource_management_algorithm = proactive_placement_algorithm
     simulator.resource_management_algorithm_parameters = {"simulator": simulator}
@@ -163,7 +162,6 @@ def plot_comparison(results, output_file):
     fig.suptitle("Comparaison des Stratégies Fog/Cloud", fontsize=16, fontweight='bold')
     
     # Couleurs
-    colors = ['#2ecc71', '#3498db', '#95a5a6'] # Vert (Pro), Bleu (React), Gris (Rand)
     colors = ['#95a5a6', '#3498db', '#2ecc71'] # Gris (Rand), Bleu (React), Vert (Pro)
     
     # 1. Pression Moyenne
@@ -236,18 +234,14 @@ def main():
     # --- Exécution des 3 Scénarios ---
     results = []
     
-    # 1. Random (Baseline faible)
     # Scénario 1: Random (Baseline faible)
     res_rand = run_scenario("Random", args, workload_idx, topo_data, strategy="random")
     results.append(res_rand)
     
-    # 2. Reactive (Baseline standard)
     # Scénario 2: Reactive (Baseline standard)
     res_react = run_scenario("Reactive (Threshold)", args, workload_idx, topo_data, strategy="reactive")
     results.append(res_react)
     
-    # 3. Proactive (Notre modèle)
-    # Scénario 3: Proactive (Notre modèle)
     res_pro = run_scenario("Proactive (DQN+LSTM)", args, workload_idx, topo_data, strategy="proactive")
     results.append(res_pro)
     

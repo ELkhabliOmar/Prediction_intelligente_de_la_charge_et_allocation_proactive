@@ -44,7 +44,7 @@
     },
     {
       "DeviceType": "Fog",
-      "Status": "active",
+      "Status": "inactive",
       "NodeType": "Node",
       "NodeName": "f2",
       "NodeId": 3,
@@ -58,7 +58,7 @@
     },
     {
       "DeviceType": "Fog",
-      "Status": "active",
+      "Status": "inactive",
       "NodeType": "Node",
       "NodeName": "f3",
       "NodeId": 4,
@@ -111,71 +111,8 @@
       "LocX": 50.4738,
       "LocY": 3.8038,
       "Location": "Saint-Ghislain, Belgium"
-    },
-    {
-      "DeviceType": "Fog",
-      "Status": "inactive",
-      "NodeType": "Node",
-      "NodeName": "f5",
-      "NodeId": 8,
-      "MaxCpuFreq": 100000,
-      "MaxBufferSize": 12288,
-      "IdleEnergyCoef": 28,
-      "ExeEnergyCoef": 140,
-      "LocX": 31.4504,
-      "LocY": 73.1350,
-      "Location": "Faisalabad, Pakistan",
-      "ActivationTimeSec": 300,
-      "ActivationEnergyCost": 1500
-    },
-    {
-      "DeviceType": "Fog",
-      "Status": "inactive",
-      "NodeType": "Node",
-      "NodeName": "f6",
-      "NodeId": 9,
-      "MaxCpuFreq": 80000,
-      "MaxBufferSize": 8192,
-      "IdleEnergyCoef": 22,
-      "ExeEnergyCoef": 110,
-      "LocX": 33.5651,
-      "LocY": 73.0169,
-      "Location": "Rawalpindi, Pakistan",
-      "ActivationTimeSec": 180,
-      "ActivationEnergyCost": 1200
-    },
-    {
-      "DeviceType": "Fog",
-      "Status": "inactive",
-      "NodeType": "Node",
-      "NodeName": "f7",
-      "NodeId": 10,
-      "MaxCpuFreq": 120000,
-      "MaxBufferSize": 16384,
-      "IdleEnergyCoef": 35,
-      "ExeEnergyCoef": 175,
-      "LocX": 30.1798,
-      "LocY": 66.9750,
-      "Location": "Quetta, Pakistan",
-      "ActivationTimeSec": 420,
-      "ActivationEnergyCost": 2000
-    },
-    {
-      "DeviceType": "Fog",
-      "Status": "inactive",
-      "NodeType": "Node",
-      "NodeName": "f8",
-      "NodeId": 11,
-      "MaxCpuFreq": 90000,
-      "MaxBufferSize": 10240,
-      "IdleEnergyCoef": 24,
-      "ExeEnergyCoef": 120,
-      "LocX": 32.1572,
-      "LocY": 74.1760,
-      "Location": "Gujranwala, Pakistan",
-      "ActivationTimeSec": 240,
-      "ActivationEnergyCost": 1300
     }
+    
   ],
   "Edges": [
     {
@@ -273,84 +210,13 @@
       "DstNodeID": 7,
       "Bandwidth": 3000,
       "LatencyMs": 120
-    },
-    {
-      "EdgeType": "SingleLink",
-      "Status": "inactive",
-      "SrcNodeID": 0,
-      "DstNodeID": 8,
-      "Bandwidth": 1800,
-      "LatencyMs": 7,
-      "ActivationTimeSec": 60
-    },
-    {
-      "EdgeType": "SingleLink",
-      "Status": "inactive",
-      "SrcNodeID": 8,
-      "DstNodeID": 0,
-      "Bandwidth": 1400,
-      "LatencyMs": 7,
-      "ActivationTimeSec": 60
-    },
-    {
-      "EdgeType": "SingleLink",
-      "Status": "inactive",
-      "SrcNodeID": 0,
-      "DstNodeID": 9,
-      "Bandwidth": 2200,
-      "LatencyMs": 3,
-      "ActivationTimeSec": 45
-    },
-    {
-      "EdgeType": "SingleLink",
-      "Status": "inactive",
-      "SrcNodeID": 9,
-      "DstNodeID": 0,
-      "Bandwidth": 1800,
-      "LatencyMs": 3,
-      "ActivationTimeSec": 45
-    },
-    {
-      "EdgeType": "SingleLink",
-      "Status": "inactive",
-      "SrcNodeID": 0,
-      "DstNodeID": 10,
-      "Bandwidth": 1600,
-      "LatencyMs": 25,
-      "ActivationTimeSec": 90
-    },
-    {
-      "EdgeType": "SingleLink",
-      "Status": "inactive",
-      "SrcNodeID": 10,
-      "DstNodeID": 0,
-      "Bandwidth": 1200,
-      "LatencyMs": 25,
-      "ActivationTimeSec": 90
-    },
-    {
-      "EdgeType": "SingleLink",
-      "Status": "inactive",
-      "SrcNodeID": 0,
-      "DstNodeID": 11,
-      "Bandwidth": 1900,
-      "LatencyMs": 5,
-      "ActivationTimeSec": 50
-    },
-    {
-      "EdgeType": "SingleLink",
-      "Status": "inactive",
-      "SrcNodeID": 11,
-      "DstNodeID": 0,
-      "Bandwidth": 1500,
-      "LatencyMs": 5,
-      "ActivationTimeSec": 50
     }
+    
   ],
   "BaseLatencyType": "haversine",
   "ScalingConstraints": {
-    "MaxActiveFogNodes": 8,
-    "MinActiveFogNodes": 3,
+    "MaxActiveFogNodes": 5,
+    "MinActiveFogNodes": 2,
     "ActivationCooldownSec": 300,
     "DeactivationCooldownSec": 900,
     "CostPerActivation": 5.0,

@@ -1,0 +1,5 @@
+name,avg_pressure,max_pressure,overload_rate,total_energy_kj,avg_offload,fog_tasks,cloud_tasks,scaling_ops,scale_up_total,scale_down_total,fog_efficiency,mae_pred,rmse_pred
+Random,0.5309765286414065,1.0,0.0,156.85382324795953,1.5057217426219636,847,1275,13,6,7,50.85097987636459,0.22118190984068734,0.29567848583249945
+Reactive (Threshold),0.0,0.0,0.0,40.4,0.0,0,0,4,0,4,0.0,0.0,0.0
+Alt (EWMA+MCDM),0.0,0.0,0.0,40.4,0.0,0,0,4,0,4,0.0,0.0,0.0
+Proactive (DQN+LSTM),0.0,0.0,0.0,46.4,0.0,0,0,4,0,4,0.0,0.0,0.0

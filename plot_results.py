@@ -33,12 +33,12 @@ def plot_simulation_results(csv_path: str, output_path: str):
     fig = plt.figure(figsize=(20, 28))
     
     # Définition des grilles
-    gs = fig.add_gridspec(9, 2, height_ratios=[3, 3, 2, 3, 3, 3, 0, 3, 3], hspace=0.5)
+    gs = fig.add_gridspec(9, 2, height_ratios=[3, 3, 0, 0, 3, 3, 0, 3, 3], hspace=0.5)
     
     ax1 = fig.add_subplot(gs[0, :])
     ax2 = fig.add_subplot(gs[1, :])
-    ax3 = fig.add_subplot(gs[2, :])
-    ax4 = fig.add_subplot(gs[3, :])
+   # ax3 = fig.add_subplot(gs[2, :])
+   # ax4 = fig.add_subplot(gs[3, :])
     ax5 = fig.add_subplot(gs[4, 0])  # Métriques gauche
     ax6 = fig.add_subplot(gs[4, 1])  # Métriques droite
     ax7 = fig.add_subplot(gs[5, :])  # Prédictions vs Réalité
@@ -58,10 +58,10 @@ def plot_simulation_results(csv_path: str, output_path: str):
     plot_pressure_predictions(ax2, df, metrics)
     
     # --- 3. Offloading et Décisions ---
-    plot_offloading_decisions(ax3, df, metrics)
+   # plot_offloading_decisions(ax3, df, metrics)
     
     # --- 4. Distribution de la Pression (Histogramme) ---
-    plot_pressure_histogram(ax4, df)
+   # plot_pressure_histogram(ax4, df)
     
     # --- 5. Métriques de Performance (Gauche) ---
     plot_performance_metrics_left(ax5, metrics)

@@ -272,6 +272,10 @@ def main():
         # Facteur 10 pour amplifier les gradients
         reward = - (penalty * 10.0)
 
+        # DEBUG: Voir la pénalité varier (à supprimer plus tard)
+        if step % 1000 == 0:
+             print(f"   [Debug] Action={a} (0=Fog) | Pression={pressure:.2f} -> Penalty={penalty:.4f} (Sat:{norm_sat:.2f} Nrj:{norm_nrj:.2f})")
+
         # Bonus de guidage: Encourager Fog si non saturé
         if a == 0 and pressure_next < 0.85:
             reward += 2.0
