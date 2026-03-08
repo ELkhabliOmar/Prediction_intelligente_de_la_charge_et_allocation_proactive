@@ -291,7 +291,7 @@ class BaselineARIMA_TOPSIS:
         # Paramètres de contrôle
         self.target_util = 0.70
         self.scale_up_threshold = 0.80
-        self.scale_down_threshold = 0.30
+        self.scale_down_threshold = 0.40
         self.offload_threshold = 0.90
         
         self.metrics = []
@@ -359,7 +359,8 @@ class BaselineARIMA_TOPSIS:
             elif pred_pressure < self.scale_down_threshold:
                 # Trouver un nœud actif vide
                 active = self._active_fogs()
-                candidates = [f for f in active if len(f["tasks"]) == 0]
+                # CORRECTION: On autorise la désactivation si le noeud est très peu chargé (< 5%), pas seulement vide
+                candidates = [f for f in active if (f["used_cpu"] / f["capacity"]) < 0.05]
                 if len(active) > 1 and candidates:
                     cand = sorted(candidates, key=lambda x: x["capacity"])[0]
                     cand["active"] = False
