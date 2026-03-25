@@ -133,26 +133,23 @@ class ARIMAPredictor:
     def predict(self, steps=1):
         # Warm-up : pas assez d'historique
         if len(self.history) < 12:
-            return float(self.ewma), 0.08
+            return float(self.ewma), 0.0
 
         data = list(self.history)
         if np.std(data) < 1e-9:
             return float(data[-1]), 0.0
 
         if not STATSMODELS_AVAILABLE:
-            return float(self.ewma), max(0.05, float(np.std(data[-min(len(data), 10):])))
+            return float(self.ewma), 0.0
 
         try:
             model = ARIMA(data, order=self.order)
             fit = model.fit()
             forecast = fit.forecast(steps=steps)
             pred = float(max(0.0, forecast[-1]))
-            resid = np.asarray(fit.resid, dtype=float)
-            unc = float(np.std(resid)) if resid.size > 1 else 0.08
-            unc = max(0.03, min(0.35, unc))
-            return pred, unc
+            return pred, 0.0
         except Exception:
-            return float(self.ewma), max(0.05, float(np.std(data[-min(len(data), 10):])))
+            return float(self.ewma), 0.0
 
 
 # ============================================================
@@ -340,7 +337,7 @@ class BaselineARIMA_TOPSIS_Corrected:
             node["used_cpu"] = max(0.0, node["used_cpu"] - freed_cpu)
             node["used_ram"] = max(0.0, node.get("used_ram", 0.0) - freed_ram)
 
-    def _apply_scaling(self, t, pred_pressure):
+    def _apply_scaling(self, t, pred_pressure, current_pressure):
         scale_decision = "none"
         active = self._active_fogs()
         cooldown_ok = (t - self.last_scaling_tick) >= self.scaling_cooldown
@@ -348,10 +345,13 @@ class BaselineARIMA_TOPSIS_Corrected:
         if t < self.warmup_ticks or not cooldown_ok:
             return scale_decision
 
-        if pred_pressure >= self.scale_up_threshold:
+        # ✅ MODIF: On scale UP si la prédiction est haute OU si la réalité est critique (> 85%)
+        # Seuil abaissé à 75% (0.75) pour activer les nœuds libres plus vite
+        if pred_pressure >= self.scale_up_threshold or current_pressure > 0.75:
             self.up_counter += 1
             self.down_counter = 0
-        elif pred_pressure <= self.scale_down_threshold:
+        # On scale DOWN seulement si prédiction ET réalité sont basses (pour éviter le bagottement)
+        elif pred_pressure <= self.scale_down_threshold and current_pressure < 0.60:
             self.down_counter += 1
             self.up_counter = 0
         else:
@@ -409,7 +409,7 @@ class BaselineARIMA_TOPSIS_Corrected:
                 pred_pressure, pred_unc = self.predictor.predict(steps=self.predictor_horizon)
 
             # 3) Scaling robuste
-            scale_decision = self._apply_scaling(t, pred_pressure)
+            scale_decision = self._apply_scaling(t, pred_pressure, pressure_before)
 
             # 4) Allocation des tâches
             new_tasks = tasks_by_time.get(t, [])
@@ -778,11 +778,11 @@ def plot_simulation_results(csv_path, output_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Baseline corrigée : ARIMA + TOPSIS")
-    parser.add_argument("--workload", required=True, help="Chemin CSV workload")
-    parser.add_argument("--topology", required=True, help="Chemin JSON topologie")
-    parser.add_argument("--ticks", type=int, default=300)
-    parser.add_argument("--output_csv", default="baseline_results_corrected.csv")
-    parser.add_argument("--output_plot", default="baseline_plot_corrected.png")
+    parser.add_argument("--workload", default="dataset/Pakistan/data/Tuple30K/testset.csv", help="Chemin CSV workload")
+    parser.add_argument("--topology", default="topology/fog_cloud_topology.json", help="Chemin JSON topologie")
+    parser.add_argument("--ticks", type=int, default=200)
+    parser.add_argument("--output_csv", default="data/results_baseline_test.csv")
+    parser.add_argument("--output_plot", default="data/plot_baseline_test.png")
 
     parser.add_argument("--cpu_scale", type=float, default=1000.0)
     parser.add_argument("--warmup_ticks", type=int, default=20)
@@ -792,7 +792,7 @@ def main():
     parser.add_argument("--offload_threshold", type=float, default=0.92)
     parser.add_argument("--up_patience", type=int, default=2)
     parser.add_argument("--down_patience", type=int, default=3)
-    parser.add_argument("--min_active_fogs", type=int, default=2)
+    parser.add_argument("--min_active_fogs", type=int, default=3) # Min 3 nœuds actifs
     parser.add_argument("--scaling_cooldown", type=int, default=8)
     parser.add_argument("--low_node_util_threshold", type=float, default=0.10)
     args = parser.parse_args()

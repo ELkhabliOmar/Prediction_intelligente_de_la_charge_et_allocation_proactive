@@ -373,7 +373,7 @@ class Module2_HVWPO_Planner:
         reason = "within band"
         
         # ✅ SEUILS RÉGLÉS POUR SIMULATION RÉALISTE
-        up_th = 0.85    # Seuil haut
+        up_th = 0.70    # Seuil abaissé à 70% pour forcer l'usage de plus de nœuds
         down_th = self.down_threshold  # 0.30
 
         # ===== DÉCISION DE SCALING =====
@@ -555,8 +555,9 @@ def _normalize_task_row(row: Dict[str, Any]) -> Dict[str, Any]:
     cpu_scale = 3000.0
     ram_scale = 1.0
 
-    cpu_demand = int(max(1.0, (task_size * cycles_per_bit) / cpu_scale))
-    ram_demand = int(max(64.0, task_size * ram_scale))
+    # ✅ CORRECTION: Utiliser float pour correspondre à la précision de la baseline (ARIMA)
+    cpu_demand = float(max(1.0, (task_size * cycles_per_bit) / cpu_scale))
+    ram_demand = float(max(64.0, task_size * ram_scale))
     duration = int(max(1.0, math.ceil(task_size / trans_rate)))
 
     return {
@@ -573,8 +574,8 @@ def _normalize_task_row(row: Dict[str, Any]) -> Dict[str, Any]:
 # =========================================================
 # Calcule la somme des demandes CPU des services actifs sur un serveur donné.
 # Objectif : Connaître la charge actuelle absolue (en unités CPU) d'un serveur.
-def active_cpu_on_server(active_services: List[Service], server: EdgeServer) -> int:
-    return int(sum(s.cpu_demand for s in active_services if getattr(s, "placed_on_server", None) == server))
+def active_cpu_on_server(active_services: List[Service], server: EdgeServer) -> float:
+    return float(sum(s.cpu_demand for s in active_services if getattr(s, "placed_on_server", None) == server))
 
 # Calcule le ratio d'utilisation (pression) d'un serveur spécifique.
 # Objectif : Obtenir le pourcentage d'utilisation d'un serveur (0.0 à 1.0+).
@@ -735,6 +736,24 @@ def proactive_placement_algorithm(parameters):
         if not hasattr(f, "base_cpu"):
             f.base_cpu = f.cpu
 
+    # -------------------------------------------------------------
+    # 🔍 DIAGNOSTIC TOPOLOGIE (Au tick 0 uniquement)
+    # -------------------------------------------------------------
+    if CURRENT_T == 0:
+        active_fogs_start = [f for f in fogs if getattr(f, "status", "active") == "active"]
+        print(f"\n[INIT] 🔍 TOPOLOGIE DÉTECTÉE: {len(fogs)} nœuds Fog, {len(clouds)} nœuds Cloud.")
+        print(f"       👉 Fogs actifs au démarrage: {len(active_fogs_start)} / {len(fogs)}")
+        
+        # Force l'activation de 3 nœuds min pour mieux répartir la charge
+        MIN_STARTUP = 3
+        if len(active_fogs_start) < MIN_STARTUP:
+            print(f"       ⚠️ Trop peu de nœuds actifs. Activation forcée de {MIN_STARTUP} nœuds pour le warmup.")
+            sorted_fogs = sorted(fogs, key=lambda x: getattr(x, "name", "")) # Tri stable
+            for i in range(min(len(sorted_fogs), MIN_STARTUP)):
+                f = sorted_fogs[i]
+                f.status = "active"
+                f.cpu = getattr(f, "base_cpu", f.cpu)
+
     # 1) Fin des services
     remaining = []
     for s in ACTIVE_SERVICES:
@@ -760,7 +779,7 @@ def proactive_placement_algorithm(parameters):
         app.image = GLOBAL_IMAGE
         app.model = simulator
 
-        service = Service(cpu_demand=task["cpu_demand"], memory_demand=task["ram_demand"])
+        service = Service(cpu_demand=float(task["cpu_demand"]), memory_demand=float(task["ram_demand"]))
         service.name = f"Task-{task['task_id']}"
         service.application = app
         service.image = GLOBAL_IMAGE
@@ -774,16 +793,16 @@ def proactive_placement_algorithm(parameters):
                                    and getattr(s, "placed_on_server", None) in active_fogs_list)
                                    
         total_fog_capacity = sum(int(f.cpu) for f in active_fogs_list)
-        pressure_global = float(total_active_cpu_fog) / max(1.0, float(total_fog_capacity))
+        pressure_global = total_active_cpu_fog / max(1.0, float(total_fog_capacity))
 
-        fog_choice, _ = pick_best_fog(fogs, ACTIVE_SERVICES, task_cpu=int(task["cpu_demand"]))
+        fog_choice, _ = pick_best_fog(fogs, ACTIVE_SERVICES, task_cpu=task["cpu_demand"])
 
         fog_projected_load = active_cpu_on_server(ACTIVE_SERVICES, fog_choice) + task["cpu_demand"]
         fog_is_full = fog_projected_load > fog_choice.cpu
 
         decision, used_fallback_dqn = MODULE3.decide(
-            task_cpu=int(task["cpu_demand"]),
-            task_ram=int(task["ram_demand"]),
+            task_cpu=float(task["cpu_demand"]),
+            task_ram=float(task["ram_demand"]),
             pressure=float(pressure_global),
             fog_cpu=int(fog_choice.cpu),
             offload_ratio=float(PLAN.get("offload_ratio", 0.0)),
@@ -834,7 +853,7 @@ def proactive_placement_algorithm(parameters):
     
     for f in fogs: # On itère sur TOUS les fogs (actifs et inactifs) pour avoir des colonnes CSV stables
         util = pressure_server(ACTIVE_SERVICES, f)
-        load = active_cpu_on_server(ACTIVE_SERVICES, f)
+        load = float(active_cpu_on_server(ACTIVE_SERVICES, f))
         is_active = (getattr(f, "status", "active") == "active")
         
         power = 0.0
@@ -852,7 +871,7 @@ def proactive_placement_algorithm(parameters):
     # ✅ Collecte des stats par nœud (Cloud)
     for c in clouds:
         safe_name = getattr(c, "name", "Unknown").replace("-", "_").replace(" ", "")
-        load = active_cpu_on_server(ACTIVE_SERVICES, c)
+        load = float(active_cpu_on_server(ACTIVE_SERVICES, c))
         per_node_stats[f"cloud_{safe_name}_load"] = load
 
     # ✅ 4) MAPE/Plan toutes W ticks
@@ -889,7 +908,8 @@ def proactive_placement_algorithm(parameters):
                 print(f"[scale] ⚠️ No inactive nodes for horizontal up (pressure={current_p_clip:.2f})")
 
         elif PLAN["scale_decision"] == "down":
-            if len(active_fogs_list) > 1:
+            # On garde au moins 2 nœuds actifs (ou 3 si on veut être très large)
+            if len(active_fogs_list) > 2:
                 # Trier par charge croissante (les moins chargés d'abord)
                 sorted_fogs = sorted(active_fogs_list, 
                                     key=lambda f: pressure_server(ACTIVE_SERVICES, f))
@@ -941,7 +961,7 @@ def proactive_placement_algorithm(parameters):
     # Affichage tick
     print_tick(
         t=CURRENT_T,
-        active_cpu=int(total_active_cpu_fog),
+        active_cpu=float(total_active_cpu_fog),
         cap=int(total_fog_capacity),
         pressure=float(pressure_global_real),
         worst=float(worst_fog_p),
@@ -955,7 +975,7 @@ def proactive_placement_algorithm(parameters):
     pred_h5 = PREDICTIONS.get(5, {})
     metric_row = {
         "t": int(CURRENT_T),
-        "active_cpu_fog": int(total_active_cpu_fog),
+        "active_cpu_fog": float(total_active_cpu_fog),
         "fog_capacity": int(total_fog_capacity),
         "pressure": float(pressure_global_real),
         "worst_fog_pressure": float(worst_fog_p),

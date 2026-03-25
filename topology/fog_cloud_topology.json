@@ -44,7 +44,7 @@
     },
     {
       "DeviceType": "Fog",
-      "Status": "inactive",
+      "Status": "active",
       "NodeType": "Node",
       "NodeName": "f2",
       "NodeId": 3,
@@ -58,7 +58,7 @@
     },
     {
       "DeviceType": "Fog",
-      "Status": "inactive",
+      "Status": "active",
       "NodeType": "Node",
       "NodeName": "f3",
       "NodeId": 4,

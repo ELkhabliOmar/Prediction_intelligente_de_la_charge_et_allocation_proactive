@@ -30,6 +30,7 @@ TRAIN_LSTM_IMPROVED_SCRIPT = "models/train_lstm.py"  # Nouveau script amélioré
 TRAIN_DQN_SCRIPT  = "models/train_dqn.py"
 SIM_SCRIPT        = "project/test.py"
 PLOT_SCRIPT       = "plot_results.py"
+BASELINE_SCRIPT   = "simple_baseline_arima_threshold.py"
 
 # --- Helpers UI ---
 def clear():
@@ -231,6 +232,7 @@ def show_menu():
     print(color(" 5", "cyan"), "- Pipeline complet (LSTM → DQN → SIM → PLOT)")
     print(color(" 6", "cyan"), "- Vérifier fichiers / chemins")
     print(color(" 7", "cyan"), "- Comparer les datasets")
+    print(color(" 8", "cyan"), "- Lancer Baseline (ARIMA)")
     print(color(" 0", "cyan"), "- Quitter")
     print(hr("-", 72))
 
@@ -624,6 +626,17 @@ def run_plot():
     cmd = f'python "{PLOT_SCRIPT}" --input "{input_csv}" --output "{output_png}"'
     run_cmd(cmd, "📈 GÉNÉRATION GRAPHIQUE")
 
+def run_baseline():
+    clear()
+    banner()
+    print(color("📉 Lancer la Baseline (ARIMA)", "bold"))
+    if not Path(BASELINE_SCRIPT).exists():
+        print(color(f"❌ Script introuvable: {BASELINE_SCRIPT}", "red"))
+        pause()
+        return
+    cmd = f'python "{BASELINE_SCRIPT}"'
+    run_cmd(cmd, "📉 BASELINE ARIMA")
+
 def full_pipeline():
     clear()
     banner()
@@ -753,6 +766,8 @@ def main():
             verify_files()
         elif choice == "7":
             compare_datasets()
+        elif choice == "8":
+            run_baseline()
         elif choice == "0":
             clear()
             print(color("👋 Bye !", "cyan"))
