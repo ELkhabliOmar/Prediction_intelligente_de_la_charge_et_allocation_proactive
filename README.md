@@ -5,11 +5,12 @@ Ce projet met en œuvre un système d'allocation proactive de ressources pour le
 ## Fonctionnalités Clés
 
 *   **Cycle MAPE Proactif** : Le cœur du simulateur est une boucle MAPE qui s'exécute périodiquement pour adapter les ressources de manière préventive.
-*   **Prédiction de Charge (LSTM)** : Un modèle `EnhancedLSTM` avec mécanisme d'attention prédit la charge future du pool de nœuds Fog.
-*   **Planification Stratégique (H-VWPO)** : Un planificateur heuristique prend des décisions de *scaling vertical* (augmenter/diminuer la capacité CPU des nœuds Fog) et de *scaling horizontal* (définir un ratio de délestage vers le Cloud).
-*   **Ordonnancement (DQN)** : Un agent d'Apprentissage par Renforcement Profond (DQN) décide pour chaque tâche si elle doit être placée sur le Fog ou le Cloud, en tenant compte du plan proactif.
+*   **Prédiction Probabiliste (Bayesian LSTM)** : Utilise un réseau LSTM Bayésien avec **Monte Carlo Dropout** pour prédire la charge future et estimer l'incertitude, permettant des décisions plus robustes.
+*   **Planification Stratégique H-VWPO (Horizontal Only)** : Optimise le pool Fog via un scaling horizontal proactif (activation/désactivation de nœuds) et un scaling vertical dynamique pour le repli (downscale).
+*   **Ordonnancement Intelligent (DQN)** : Un agent DQN optimise le placement des tâches avec une fonction de récompense pondérée : **80% Saturation, 10% Énergie, 10% Latence**.
 *   **Gestion d'Énergie** : La simulation suit une estimation de la consommation d'énergie en Joules des nœuds Fog.
-*   **Lanceur Interactif** : Un menu (`menu.py`) guide l'utilisateur pour entraîner les modèles, lancer des simulations et générer des graphiques.
+*   **Baseline Scientifique** : Inclut une comparaison avec une approche standard **ARIMA + TOPSIS** pour valider les gains de l'approche proactive.
+*   **Lanceur Interactif Amélioré** : Un menu (`menu.py`) complet pour gérer les datasets, les entraînements et les pipelines complets.
 *   **Visualisation Détaillée** : Un script (`plot_results.py`) génère des rapports graphiques complets sur les performances de la simulation (pression, prédictions, scaling, délestage, etc.).
 
 ## Architecture
@@ -18,20 +19,21 @@ Le système est construit sur le simulateur `edge-sim-py` et se compose de trois
 
 ### 1. Module 1: Prédiction de Charge Multi-Horizon (Analyse)
 *   **Objectif :** Prédire l'utilisation future des ressources (pression CPU) sur le pool Fog.
-*   **Méthode :** Utilise un réseau de neurones **EnhancedLSTM** (Long Short-Term Memory avec attention) chargé à partir d'un fichier pré-entraîné (`.pth`). Le modèle fournit des prédictions de charge et une estimation de l'incertitude.
+*   **Méthode :** Réseau **Bayesian LSTM** avec Attention. Il traite 4 features (Pression, Densité, Heure, Tendance) pour fournir une moyenne de prédiction et un intervalle de confiance.
 
 ### 2. Module 2: Planification Proactive (Planification)
 *   **Objectif :** Déterminer les ajustements stratégiques des ressources sur la base des prédictions.
 *   **Méthode :** Implémente une logique heuristique inspirée de H-VWPO.
 *   **Décisions :**
-    *   **Scaling Vertical :** Décide de `scale_up` (augmenter) ou `scale_down` (diminuer) la capacité CPU d'un nœud Fog pour s'aligner sur la charge prédite tout en visant une utilisation cible (ex: 70%).
+    *   **Scaling Horizontal :** Active de nouveaux nœuds Fog si la charge projetée dépasse 70%.
+    *   **Scaling Down Hybride :** Désactive les nœuds inutilisés ou réduit leur capacité CPU (Vertical Down) en période de faible charge.
     *   **Délestage (Offloading) :** Calcule un ratio global de délestage vers le Cloud si la charge prédite risque de dépasser la capacité du Fog.
 
 ### 3. Module 3: Ordonnancement Proactif (Exécution)
 *   **Objectif :** Assurer le placement fin de chaque service/tâche individuel.
 *   **Méthode :**
-    *   **Fog vs. Cloud :** Utilise un modèle **DQN** (Deep Q-Network) pour décider du placement (Fog ou Cloud) en fonction de l'état actuel du système et du ratio de délestage fourni par le planificateur.
-    *   **Sélection du Nœud Fog :** Utilise une heuristique simple pour sélectionner le nœud Fog le moins chargé (`pick_best_fog`).
+    *   **Fog vs. Cloud :** Agent **DQN** entraîné pour minimiser la saturation du Fog (poids 0.8) tout en balançant l'énergie et la latence.
+    *   **Sélection du Nœud Fog :** Algorithme de sélection multicritère (Saturation, Énergie, Latence) pour le load balancing intra-fog.
 
 ## Structure du Projet
 
@@ -41,9 +43,10 @@ Le système est construit sur le simulateur `edge-sim-py` et se compose de trois
 ├── menu.py                 # Lanceur interactif pour le projet
 ├── plot_results.py         # Script pour générer les graphiques d'analyse
 ├── generate_workload.py    # Script pour générer les datasets de charge
+├── simple_baseline_arima_threshold.py # Comparaison avec ARIMA + TOPSIS
 ├── requirements.txt        # Dépendances Python
 ├── models/
-│   ├── train_lstm.py       # Script d'entraînement du modèle LSTM
+│   ├── train_lstm.py       # Entraînement du LSTM Bayésien (Incertitude)
 │   └── train_dqn.py        # Script d'entraînement du modèle DQN
 ├── project/
 │   ├── test.py             # Script principal de simulation (boucle MAPE)
